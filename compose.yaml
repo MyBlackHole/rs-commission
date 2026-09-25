@@ -1,0 +1,43 @@
+# Local development only. Production: separate migration/runtime roles and HTTPS.
+services:
+  db:
+    image: postgres:18
+    environment:
+      POSTGRES_USER: commission
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: commission
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - database:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U commission -d commission"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+  migrate:
+    build: .
+    command: ["migrate"]
+    environment:
+      DATABASE_URL: postgres://commission:${POSTGRES_PASSWORD}@db:5432/commission
+    depends_on:
+      db:
+        condition: service_healthy
+  app:
+    build: .
+    environment:
+      DATABASE_URL: postgres://commission:${POSTGRES_PASSWORD}@db:5432/commission
+      BIND_ADDR: 0.0.0.0:8080
+      RELEASE_WORKER: "true"
+      RUST_LOG: commission=info,tower_http=info
+    ports:
+      - "127.0.0.1:8080:8080"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    stop_grace_period: 40s
+volumes:
+  database:
