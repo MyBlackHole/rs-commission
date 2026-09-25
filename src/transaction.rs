@@ -9,7 +9,6 @@ use uuid::Uuid;
 pub fn digest(bytes: &[u8]) -> String { hex::encode(Sha256::digest(bytes)) }
 
 pub fn fingerprint<T: Serialize>(value: &T) -> Result<String> {
-    // Struct serialization and serde_json's default ordered map are deterministic.
     Ok(digest(&serde_json::to_vec(value)?))
 }
 
@@ -23,7 +22,7 @@ pub struct Work {
 }
 
 impl Work {
-    pub async fn begin<T: Serialize>(pool: &PgPool, actor: &Actor, operation: &str, key: &str, input: &T) -> Result<Start> {
+    pub async fn begin<T: Serialize + Sync>(pool: &PgPool, actor: &Actor, operation: &str, key: &str, input: &T) -> Result<Start> {
         if !(8..=128).contains(&key.len()) || !key.bytes().all(|c| c.is_ascii_graphic()) {
             return Err(Error::invalid("Idempotency-Key 必须为 8..128 个可见 ASCII 字符"));
         }
@@ -32,7 +31,6 @@ impl Work {
         configure(&mut tx).await?;
         sqlx::query("INSERT INTO idempotency(actor_id, operation, key, request_hash) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING")
             .bind(actor.id).bind(operation).bind(key).bind(&hash).execute(&mut *tx).await?;
-        // A competing insert with the same unique key waits for the first commit.
         let (stored_hash, response): (String, Option<Value>) = sqlx::query_as(
             "SELECT request_hash, response FROM idempotency WHERE actor_id=$1 AND operation=$2 AND key=$3 FOR UPDATE")
             .bind(actor.id).bind(operation).bind(key).fetch_one(&mut *tx).await?;
@@ -56,8 +54,9 @@ impl Work {
 }
 
 pub async fn configure(tx: &mut Transaction<'_, Postgres>) -> Result<()> {
-    sqlx::raw_sql("SET LOCAL lock_timeout = '5s'; SET LOCAL statement_timeout = '15s';")
-        .execute(&mut **tx).await?;
+    // Individual prepared statements keep the transaction future Send for Axum.
+    sqlx::query("SET LOCAL lock_timeout = '5s'").execute(&mut **tx).await?;
+    sqlx::query("SET LOCAL statement_timeout = '15s'").execute(&mut **tx).await?;
     Ok(())
 }
 
