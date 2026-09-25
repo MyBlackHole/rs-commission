@@ -1,27 +1,44 @@
-use axum::{http::StatusCode, response::{IntoResponse, Response}, Json};
+use axum::{
+    http::StatusCode,
+    response::{IntoResponse, Response},
+    Json,
+};
 use serde_json::json;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    #[error("{0}")] Invalid(String),
-    #[error("请提供有效且未过期的访问令牌")] Unauthorized,
-    #[error("当前角色无权执行此操作")] Forbidden,
-    #[error("记录不存在或不可访问")] NotFound,
-    #[error("{0}")] Conflict(String),
-    #[error("服务暂时繁忙，请使用相同幂等键重试")] Busy,
-    #[error("内部错误")] Internal,
+    #[error("{0}")]
+    Invalid(String),
+    #[error("请提供有效且未过期的访问令牌")]
+    Unauthorized,
+    #[error("当前角色无权执行此操作")]
+    Forbidden,
+    #[error("记录不存在或不可访问")]
+    NotFound,
+    #[error("{0}")]
+    Conflict(String),
+    #[error("服务暂时繁忙，请使用相同幂等键重试")]
+    Busy,
+    #[error("内部错误")]
+    Internal,
 }
 pub type Result<T> = std::result::Result<T, Error>;
 impl Error {
-    pub fn invalid(message: impl Into<String>) -> Self { Self::Invalid(message.into()) }
-    pub fn conflict(message: impl Into<String>) -> Self { Self::Conflict(message.into()) }
+    pub fn invalid(message: impl Into<String>) -> Self {
+        Self::Invalid(message.into())
+    }
+    pub fn conflict(message: impl Into<String>) -> Self {
+        Self::Conflict(message.into())
+    }
 }
 impl From<commission_types::error::Error> for Error {
     fn from(value: commission_types::error::Error) -> Self {
         use commission_types::error::Error as Shared;
         match value {
-            Shared::Invalid(message) => Self::Invalid(message), Shared::Forbidden => Self::Forbidden,
-            Shared::NotFound => Self::NotFound, Shared::Internal => Self::Internal,
+            Shared::Invalid(message) => Self::Invalid(message),
+            Shared::Forbidden => Self::Forbidden,
+            Shared::NotFound => Self::NotFound,
+            Shared::Internal => Self::Internal,
         }
     }
 }
@@ -57,6 +74,10 @@ impl IntoResponse for Error {
             Self::Busy => (StatusCode::SERVICE_UNAVAILABLE, "retryable"),
             Self::Internal => (StatusCode::INTERNAL_SERVER_ERROR, "internal_error"),
         };
-        (status, Json(json!({"error": {"code": code, "message": self.to_string()}}))).into_response()
+        (
+            status,
+            Json(json!({"error": {"code": code, "message": self.to_string()}})),
+        )
+            .into_response()
     }
 }

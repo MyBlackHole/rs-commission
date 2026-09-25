@@ -1,5 +1,8 @@
 //! Pure business arithmetic: no database, network, current clock, or rounding floats.
-use crate::{error::{Error, Result}, money::{Money, MAX_OPERATION_MINOR}};
+use crate::{
+    error::{Error, Result},
+    money::{Money, MAX_OPERATION_MINOR},
+};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -21,10 +24,14 @@ impl Terms {
             || !(0..=10_000).contains(&self.indirect_bps)
             || self.direct_bps + self.indirect_bps > 10_000
         {
-            return Err(Error::invalid("费率须为 0..10000 基点，两级返佣比例之和不能超过 10000"));
+            return Err(Error::invalid(
+                "费率须为 0..10000 基点，两级返佣比例之和不能超过 10000",
+            ));
         }
         if !(0..=MAX_OPERATION_MINOR).contains(&self.fixed_minor.0)
-            || self.cap_minor.is_some_and(|m| !(0..=MAX_OPERATION_MINOR).contains(&m.0))
+            || self
+                .cap_minor
+                .is_some_and(|m| !(0..=MAX_OPERATION_MINOR).contains(&m.0))
             || !(0..=31_536_000).contains(&self.freeze_seconds)
         {
             return Err(Error::invalid("固定费用、封顶金额或冻结时间超出范围"));
@@ -44,12 +51,20 @@ pub struct Split {
 
 pub fn positive(amount: Money) -> Result<()> {
     if amount.0 <= 0 || amount.0 > MAX_OPERATION_MINOR {
-        return Err(Error::invalid("单次金额必须大于 0 且不超过 100000000000000 分"));
+        return Err(Error::invalid(
+            "单次金额必须大于 0 且不超过 100000000000000 分",
+        ));
     }
     Ok(())
 }
 
-pub fn split(paid: Money, base: Money, terms: &Terms, direct: bool, indirect: bool) -> Result<Split> {
+pub fn split(
+    paid: Money,
+    base: Money,
+    terms: &Terms,
+    direct: bool,
+    indirect: bool,
+) -> Result<Split> {
     positive(paid)?;
     if base.0 < 0 || base > paid {
         return Err(Error::invalid("计佣基数必须在 0 与实付金额之间"));
@@ -58,12 +73,20 @@ pub fn split(paid: Money, base: Money, terms: &Terms, direct: bool, indirect: bo
         return Err(Error::invalid("不存在一级推广员时不能计算二级返佣"));
     }
     terms.validate()?;
-    let raw_fee = i128::from(base.0) * i128::from(terms.rate_bps) / 10_000
-        + i128::from(terms.fixed_minor.0);
+    let raw_fee =
+        i128::from(base.0) * i128::from(terms.rate_bps) / 10_000 + i128::from(terms.fixed_minor.0);
     let cap = terms.cap_minor.map_or(base.0, |m| m.0.min(base.0));
     let fee = raw_fee.min(i128::from(cap)) as i64;
-    let first = if direct { ((i128::from(fee) * i128::from(terms.direct_bps)) / 10_000) as i64 } else { 0 };
-    let second = if indirect { ((i128::from(fee) * i128::from(terms.indirect_bps)) / 10_000) as i64 } else { 0 };
+    let first = if direct {
+        ((i128::from(fee) * i128::from(terms.direct_bps)) / 10_000) as i64
+    } else {
+        0
+    };
+    let second = if indirect {
+        ((i128::from(fee) * i128::from(terms.indirect_bps)) / 10_000) as i64
+    } else {
+        0
+    };
     Ok(Split {
         fee_pool_minor: Money(fee),
         merchant_minor: Money(paid.0 - fee),
@@ -109,16 +132,28 @@ mod tests {
     use proptest::prelude::*;
 
     fn terms() -> Terms {
-        Terms { rate_bps: 1000, fixed_minor: Money(0), cap_minor: None,
-            direct_bps: 3000, indirect_bps: 1000, freeze_seconds: 0 }
+        Terms {
+            rate_bps: 1000,
+            fixed_minor: Money(0),
+            cap_minor: None,
+            direct_bps: 3000,
+            indirect_bps: 1000,
+            freeze_seconds: 0,
+        }
     }
 
     #[test]
     fn fees_come_from_one_pool() {
-        assert_eq!(split(Money(10000), Money(10000), &terms(), true, true).unwrap(), Split {
-            fee_pool_minor: Money(1000), merchant_minor: Money(9000), platform_minor: Money(600),
-            direct_minor: Money(300), indirect_minor: Money(100),
-        });
+        assert_eq!(
+            split(Money(10000), Money(10000), &terms(), true, true).unwrap(),
+            Split {
+                fee_pool_minor: Money(1000),
+                merchant_minor: Money(9000),
+                platform_minor: Money(600),
+                direct_minor: Money(300),
+                indirect_minor: Money(100),
+            }
+        );
     }
 
     #[test]
@@ -133,10 +168,25 @@ mod tests {
         let mut t = terms();
         t.fixed_minor = Money(2000);
         t.cap_minor = Some(Money(50));
-        assert_eq!(split(Money(10000), Money(10000), &t, true, true).unwrap().fee_pool_minor, Money(50));
-        assert_eq!(split(Money(100), Money(0), &t, true, true).unwrap().fee_pool_minor, Money(0));
+        assert_eq!(
+            split(Money(10000), Money(10000), &t, true, true)
+                .unwrap()
+                .fee_pool_minor,
+            Money(50)
+        );
+        assert_eq!(
+            split(Money(100), Money(0), &t, true, true)
+                .unwrap()
+                .fee_pool_minor,
+            Money(0)
+        );
         t.cap_minor = None;
-        assert_eq!(split(Money(100), Money(100), &t, false, false).unwrap().merchant_minor, Money(0));
+        assert_eq!(
+            split(Money(100), Money(100), &t, false, false)
+                .unwrap()
+                .merchant_minor,
+            Money(0)
+        );
     }
 
     #[test]
@@ -161,7 +211,9 @@ mod tests {
                     for r in 0..=total {
                         let next = cumulative_refund(&shares, Money(r)).unwrap();
                         assert_eq!(next.iter().map(|m| m.0).sum::<i64>(), r);
-                        for i in 0..4 { assert!(next[i] >= previous[i] && next[i] <= shares[i]); }
+                        for i in 0..4 {
+                            assert!(next[i] >= previous[i] && next[i] <= shares[i]);
+                        }
                         previous = next;
                     }
                     assert_eq!(previous, shares);

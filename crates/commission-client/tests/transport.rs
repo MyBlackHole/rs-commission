@@ -22,14 +22,20 @@ async fn server(responses: Vec<String>) -> (String, tokio::task::JoinHandle<Vec<
                     content_length = length.trim().parse::<usize>().unwrap();
                 }
                 request.push_str(&line);
-                if line == "\r\n" { break; }
+                if line == "\r\n" {
+                    break;
+                }
                 assert!(request.len() < 16_384);
             }
             let mut body = vec![0; content_length];
             stream.read_exact(&mut body).await.unwrap();
             request.push_str(std::str::from_utf8(&body).unwrap());
             requests.push(request);
-            stream.get_mut().write_all(response.as_bytes()).await.unwrap();
+            stream
+                .get_mut()
+                .write_all(response.as_bytes())
+                .await
+                .unwrap();
             stream.get_mut().shutdown().await.unwrap();
         }
         requests
@@ -43,11 +49,17 @@ fn response(status: &str, body: &str) -> String {
 #[tokio::test]
 async fn explicit_retry_reuses_identical_key_body_and_credentials() {
     let (address, seen) = server(vec![
-        response("503 Service Unavailable", r#"{"error":{"code":"retryable","message":"busy"}}"#),
+        response(
+            "503 Service Unavailable",
+            r#"{"error":{"code":"retryable","message":"busy"}}"#,
+        ),
         response("200 OK", r#"{"done":true}"#),
-    ]).await;
+    ])
+    .await;
     let client = ApiClient::new(&address, "test-bearer").unwrap();
-    let write = client.prepare(Operation::Release, Some(Uuid::nil()), "{}").unwrap();
+    let write = client
+        .prepare(Operation::Release, Some(Uuid::nil()), "{}")
+        .unwrap();
     let first = client.execute(&write).await.unwrap_err();
     assert!(first.outcome_unknown());
     assert_eq!(client.execute(&write).await.unwrap()["done"], true);
@@ -58,13 +70,18 @@ async fn explicit_retry_reuses_identical_key_body_and_credentials() {
         assert!(lower.contains("authorization: bearer test-bearer\r\n"));
         assert!(lower.contains(&format!("idempotency-key: {}\r\n", write.key())));
         assert!(request.ends_with("\r\n\r\n{}"));
-        assert!(request.starts_with("POST /api/v1/orders/00000000-0000-0000-0000-000000000000/release "));
+        assert!(request
+            .starts_with("POST /api/v1/orders/00000000-0000-0000-0000-000000000000/release "));
     }
 }
 
 #[tokio::test]
 async fn structured_unauthorized_is_distinguishable() {
-    let (address, seen) = server(vec![response("401 Unauthorized", r#"{"error":{"code":"unauthorized","message":"expired"}}"#)]).await;
+    let (address, seen) = server(vec![response(
+        "401 Unauthorized",
+        r#"{"error":{"code":"unauthorized","message":"expired"}}"#,
+    )])
+    .await;
     let client = ApiClient::new(&address, "expired").unwrap();
     let error = client.me().await.unwrap_err();
     assert!(error.unauthorized());
@@ -76,6 +93,11 @@ async fn structured_unauthorized_is_distinguishable() {
 async fn prepared_write_cannot_be_sent_by_another_session() {
     let first = ApiClient::new("https://example.invalid", "first").unwrap();
     let second = ApiClient::new("https://example.invalid", "second").unwrap();
-    let write = first.prepare(Operation::Release, Some(Uuid::nil()), "{}").unwrap();
-    assert!(matches!(second.execute(&write).await, Err(ClientError::Invalid(_))));
+    let write = first
+        .prepare(Operation::Release, Some(Uuid::nil()), "{}")
+        .unwrap();
+    assert!(matches!(
+        second.execute(&write).await,
+        Err(ClientError::Invalid(_))
+    ));
 }

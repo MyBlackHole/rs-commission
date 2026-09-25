@@ -1,6 +1,10 @@
 #![allow(non_snake_case)]
 //! One Rust UI for Web, desktop WebView and mobile WebView renderers.
-#[cfg(any(all(feature = "web", feature = "desktop"), all(feature = "web", feature = "mobile"), all(feature = "desktop", feature = "mobile")))]
+#[cfg(any(
+    all(feature = "web", feature = "desktop"),
+    all(feature = "web", feature = "mobile"),
+    all(feature = "desktop", feature = "mobile")
+))]
 compile_error!("Select exactly one renderer: web, desktop or mobile");
 #[cfg(not(any(feature = "web", feature = "desktop", feature = "mobile")))]
 compile_error!("A renderer feature is required");
@@ -13,15 +17,28 @@ use uuid::Uuid;
 
 const STYLE: Asset = asset!("/assets/console.css");
 #[derive(Clone)]
-struct Session { client: ApiClient, actor: Actor }
+struct Session {
+    client: ApiClient,
+    actor: Actor,
+}
 type Auth = Signal<Option<Session>>;
 
-fn main() { dioxus::launch(App); }
+fn main() {
+    dioxus::launch(App);
+}
 fn default_origin() -> String {
     #[cfg(target_arch = "wasm32")]
-    { web_sys::window().and_then(|w| w.location().origin().ok()).unwrap_or_default() }
+    {
+        web_sys::window()
+            .and_then(|w| w.location().origin().ok())
+            .unwrap_or_default()
+    }
     #[cfg(not(target_arch = "wasm32"))]
-    { option_env!("COMMISSION_API_ORIGIN").unwrap_or("http://127.0.0.1:8081").to_owned() }
+    {
+        option_env!("COMMISSION_API_ORIGIN")
+            .unwrap_or("http://127.0.0.1:8081")
+            .to_owned()
+    }
 }
 #[component]
 fn App() -> Element {
@@ -77,7 +94,9 @@ fn Login() -> Element {
 #[component]
 fn Shell() -> Element {
     let mut auth = use_context::<Auth>();
-    let Some(session) = auth.read().clone() else { return rsx! {}; };
+    let Some(session) = auth.read().clone() else {
+        return rsx! {};
+    };
     let mut view = use_signal(|| "dashboard".to_owned());
     rsx! {
         div { class: "shell",
@@ -113,20 +132,37 @@ fn Shell() -> Element {
 #[component]
 fn ReadPanel(resource: String) -> Element {
     let mut auth = use_context::<Auth>();
-    let client = auth.read().as_ref().expect("authenticated component").client.clone();
-    let title = RESOURCES.iter().find(|(name, _)| *name == resource).map_or("业务数据", |(_, title)| *title);
+    let client = auth
+        .read()
+        .as_ref()
+        .expect("authenticated component")
+        .client
+        .clone();
+    let title = RESOURCES
+        .iter()
+        .find(|(name, _)| *name == resource)
+        .map_or("业务数据", |(_, title)| *title);
     let mut offset = use_signal(|| 0_u32);
     let mut result = use_resource(move || {
-        let client = client.clone(); let resource = resource.clone(); let offset = offset();
+        let client = client.clone();
+        let resource = resource.clone();
+        let offset = offset();
         async move { client.resource(&resource, offset).await }
     });
     use_effect(move || {
         if let Some(Err(error)) = result.read().as_ref() {
-            if error.unauthorized() { auth.set(None); }
+            if error.unauthorized() {
+                auth.set(None);
+            }
         }
     });
     let data = result.read().clone();
-    let has_more = data.as_ref().and_then(|v| v.as_ref().ok()).and_then(|v| v.get("has_more")).and_then(Value::as_bool).unwrap_or(false);
+    let has_more = data
+        .as_ref()
+        .and_then(|v| v.as_ref().ok())
+        .and_then(|v| v.get("has_more"))
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
     rsx! {
         section { class: "panel",
             div { class: "section-head", h2 { "{title}" } button { class: "secondary", onclick: move |_| result.restart(), "刷新" } }
@@ -145,28 +181,56 @@ fn ReadPanel(resource: String) -> Element {
 }
 fn label(key: &str) -> &str {
     match key {
-        "paid_minor" => "实付金额", "refunded_minor" => "退款金额", "platform_net_minor" => "平台净佣金",
-        "frozen_minor" => "冻结金额", "available_minor" => "可用余额", "reserved_minor" => "提现占用",
-        "debt_minor" => "待追偿欠款", "order_count" => "订单数量", "pending_payouts" => "待处理提现",
-        "unknown_payouts" => "结果未知提现", "due_orders" => "待解冻订单", "outbox_pending" => "待投递事件",
-        "name" => "名称", "kind" => "类型", "status" => "状态", "external_id" => "业务编号",
-        "amount_minor" => "金额", "original_minor" => "原始佣金", "net_minor" => "净佣金",
-        "delta_minor" => "变动金额", "created_at" => "创建时间（UTC）", "account_id" => "账户 UUID",
-        "slot" => "分配角色", "bucket" => "余额分区", "ok" => "内部对账通过",
-        "external_payment_reconciled" => "外部支付已对账", _ => key,
+        "paid_minor" => "实付金额",
+        "refunded_minor" => "退款金额",
+        "platform_net_minor" => "平台净佣金",
+        "frozen_minor" => "冻结金额",
+        "available_minor" => "可用余额",
+        "reserved_minor" => "提现占用",
+        "debt_minor" => "待追偿欠款",
+        "order_count" => "订单数量",
+        "pending_payouts" => "待处理提现",
+        "unknown_payouts" => "结果未知提现",
+        "due_orders" => "待解冻订单",
+        "outbox_pending" => "待投递事件",
+        "name" => "名称",
+        "kind" => "类型",
+        "status" => "状态",
+        "external_id" => "业务编号",
+        "amount_minor" => "金额",
+        "original_minor" => "原始佣金",
+        "net_minor" => "净佣金",
+        "delta_minor" => "变动金额",
+        "created_at" => "创建时间（UTC）",
+        "account_id" => "账户 UUID",
+        "slot" => "分配角色",
+        "bucket" => "余额分区",
+        "ok" => "内部对账通过",
+        "external_payment_reconciled" => "外部支付已对账",
+        _ => key,
     }
 }
 fn display(key: &str, value: &Value) -> String {
     if key.ends_with("_minor") {
-        if let Some(cents) = value.as_str().and_then(|v| v.parse::<i64>().ok()) { return format!("¥ {}", Money(cents).yuan()); }
+        if let Some(cents) = value.as_str().and_then(|v| v.parse::<i64>().ok()) {
+            return format!("¥ {}", Money(cents).yuan());
+        }
     }
-    match value { Value::String(v) => v.clone(), Value::Null => "—".into(), _ => value.to_string() }
+    match value {
+        Value::String(v) => v.clone(),
+        Value::Null => "—".into(),
+        _ => value.to_string(),
+    }
 }
 #[component]
 fn DataView(value: Value) -> Element {
     let raw = serde_json::to_string_pretty(&value).unwrap_or_default();
     if let Some(items) = value.get("items").and_then(Value::as_array) {
-        let keys: Vec<String> = items.first().and_then(Value::as_object).map(|m| m.keys().cloned().collect()).unwrap_or_default();
+        let keys: Vec<String> = items
+            .first()
+            .and_then(Value::as_object)
+            .map(|m| m.keys().cloned().collect())
+            .unwrap_or_default();
         rsx! {
             if items.is_empty() { p { class: "muted", "暂无记录" } }
             else { div { class: "table-scroll", table {
@@ -176,9 +240,16 @@ fn DataView(value: Value) -> Element {
             details { summary { "查看原始 JSON" } pre { "{raw}" } }
         }
     } else {
-        let fields: Vec<(String, String)> = value.as_object().map(|m| m.iter().map(|(k,v)| (label(k).to_owned(), display(k,v))).collect()).unwrap_or_default();
+        let fields: Vec<(String, String)> = value
+            .as_object()
+            .map(|m| {
+                m.iter()
+                    .map(|(k, v)| (label(k).to_owned(), display(k, v)))
+                    .collect()
+            })
+            .unwrap_or_default();
         rsx! {
-            div { class: "metrics", for (name, content) in fields { article { class: "metric", span { "{name}" } strong { "{content}" } } }
+            div { class: "metrics", for (name, content) in fields { article { class: "metric", span { "{name}" } strong { "{content}" } } } }
             details { summary { "查看原始 JSON" } pre { "{raw}" } }
         }
     }
@@ -224,12 +295,22 @@ fn QuotePanel() -> Element {
     }
 }
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum WritePhase { Editing, Prepared, Sending, Unknown, Succeeded, Rejected }
+enum WritePhase {
+    Editing,
+    Prepared,
+    Sending,
+    Unknown,
+    Succeeded,
+    Rejected,
+}
 #[component]
 fn Operations() -> Element {
     let auth = use_context::<Auth>();
     let session = auth.read().as_ref().expect("authenticated").clone();
-    let allowed: Vec<Operation> = Operation::ALL.into_iter().filter(|op| op.allowed(&session.actor)).collect();
+    let allowed: Vec<Operation> = Operation::ALL
+        .into_iter()
+        .filter(|op| op.allowed(&session.actor))
+        .collect();
     let initial = allowed.first().copied().unwrap_or(Operation::CreateAccount);
     let mut operation = use_signal(|| initial);
     let mut target = use_signal(String::new);
@@ -238,9 +319,15 @@ fn Operations() -> Element {
     let mut phase = use_signal(|| WritePhase::Editing);
     let mut confirmed = use_signal(|| false);
     let mut message = use_signal(String::new);
-    if allowed.is_empty() { return rsx! {}; }
+    if allowed.is_empty() {
+        return rsx! {};
+    }
     let editing = phase() == WritePhase::Editing;
-    let request_info = pending.read().as_ref().map(|p| format!("POST /api/v1/{}\nIdempotency-Key: {}", p.path(), p.key())).unwrap_or_default();
+    let request_info = pending
+        .read()
+        .as_ref()
+        .map(|p| format!("POST /api/v1/{}\nIdempotency-Key: {}", p.path(), p.key()))
+        .unwrap_or_default();
     rsx! {
         section { class: "panel operations",
             h2 { "业务操作" }
