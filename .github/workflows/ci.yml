@@ -17,7 +17,7 @@ jobs:
           POSTGRES_DB: commission_test
         ports: ['5432:5432']
         options: >-
-          --health-cmd 'pg_isready -U postgres'
+          --health-cmd "pg_isready -U postgres"
           --health-interval 5s --health-timeout 5s --health-retries 12
     env:
       DATABASE_URL: postgres://postgres:postgres@localhost:5432/commission_test
@@ -48,6 +48,27 @@ jobs:
           if grep -E ' (sqlx|axum|commission-rs) v' /tmp/web-dependencies.txt; then
             echo 'A backend dependency leaked into the browser'; exit 1
           fi
+      - name: Install pinned Dioxus CLI release
+        run: |
+          curl --fail --location --retry 3 https://github.com/DioxusLabs/dioxus/releases/download/v0.7.10/dx-x86_64-unknown-linux-gnu.tar.gz -o /tmp/dx.tar.gz
+          echo '4363e4ed2a3f1eb7f4d38d2d59aed59ce43271c44c16b425e92c89a64761fbe7  /tmp/dx.tar.gz' | sha256sum --check
+          mkdir /tmp/dioxus-cli
+          tar -xzf /tmp/dx.tar.gz -C /tmp/dioxus-cli
+          install "$(find /tmp/dioxus-cli -type f -name dx -print -quit)" "$HOME/.cargo/bin/dx"
+          dx --version
+      - name: Build Web release with assets
+        working-directory: apps/console
+        run: dx build --platform web --release
+      - name: Verify bundle and dependency lock
+        run: |
+          test -f target/dx/commission-console/release/web/public/index.html
+          test -n "$(find target/dx/commission-console/release/web/public -name '*.wasm' -print -quit)"
+          git diff --exit-code -- Cargo.lock
+      - uses: actions/upload-artifact@v4
+        with:
+          name: commission-console-web
+          path: target/dx/commission-console/release/web/public
+          if-no-files-found: error
   desktop:
     strategy:
       fail-fast: false
@@ -65,6 +86,8 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev patchelf
       - run: cargo test --locked -p commission-types -p commission-client
       - run: cargo check --locked -p commission-console --no-default-features --features desktop
+      - name: Check native backend portability
+        run: cargo check --locked -p commission-rs --bin commissiond
   format:
     runs-on: ubuntu-latest
     steps:
