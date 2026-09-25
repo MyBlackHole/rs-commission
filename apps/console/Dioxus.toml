@@ -1,0 +1,12 @@
+[application]
+name = "commission-console"
+
+[web.app]
+title = "分润台 · Rust 抽佣系统"
+
+[[web.proxy]]
+backend = "http://127.0.0.1:8081/api/"
+
+[bundle]
+identifier = "com.rscommission.console"
+publisher = "rs-commission"

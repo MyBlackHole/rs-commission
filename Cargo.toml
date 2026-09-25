@@ -1,8 +1,18 @@
-[package]
-name = "commission-rs"
-version = "0.1.0"
+[workspace]
+members = [".", "crates/commission-types", "crates/commission-client", "apps/console"]
+default-members = [".", "crates/commission-types", "crates/commission-client"]
+resolver = "2"
+
+[workspace.package]
+version = "0.2.0"
 edition = "2021"
 license = "MIT"
+
+[package]
+name = "commission-rs"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
 description = "中文平台抽佣、推广返佣与结算业务账本"
 default-run = "commissiond"
 
@@ -15,6 +25,7 @@ name = "commissiond"
 path = "src/main.rs"
 
 [dependencies]
+commission-types = { path = "crates/commission-types", features = ["postgres"] }
 axum = { version = "=0.8.9", features = ["macros"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "signal", "time", "sync"] }
 sqlx = { version = "=0.8.6", default-features = false, features = ["runtime-tokio", "tls-rustls-ring", "postgres", "uuid", "chrono", "json", "migrate", "macros"] }

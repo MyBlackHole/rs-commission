@@ -1,9 +1,12 @@
-name: Rust and PostgreSQL
+name: Rust workspace
 on: [push, pull_request, workflow_dispatch]
 permissions:
   contents: read
+concurrency:
+  group: rust-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
-  test:
+  server:
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -12,24 +15,56 @@ jobs:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
           POSTGRES_DB: commission_test
-        ports: ["5432:5432"]
+        ports: ['5432:5432']
         options: >-
-          --health-cmd "pg_isready -U postgres"
+          --health-cmd 'pg_isready -U postgres'
           --health-interval 5s --health-timeout 5s --health-retries 12
     env:
       DATABASE_URL: postgres://postgres:postgres@localhost:5432/commission_test
-      RUST_BACKTRACE: "1"
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - run: cargo generate-lockfile
-      - run: cargo test --locked --all-targets
-      - run: cargo clippy --locked --all-targets -- -D warnings
-      - uses: actions/upload-artifact@v4
-        if: always()
         with:
-          name: resolved-cargo-lock
-          path: Cargo.lock
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --locked -p commission-rs -p commission-types -p commission-client --all-targets
+      - run: cargo clippy --locked -p commission-rs -p commission-types -p commission-client --all-targets -- -D warnings
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: wasm
+      - run: cargo check --locked -p commission-console --target wasm32-unknown-unknown --no-default-features --features web
+      - run: cargo clippy --locked -p commission-console --target wasm32-unknown-unknown --no-default-features --features web -- -D warnings
+      - name: Verify client dependency boundary
+        run: |
+          cargo tree --locked -p commission-console --target wasm32-unknown-unknown --no-default-features --features web -e normal > /tmp/web-dependencies.txt
+          if grep -E ' (sqlx|axum|commission-rs) v' /tmp/web-dependencies.txt; then
+            echo 'A backend dependency leaked into the browser'; exit 1
+          fi
+  desktop:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: desktop
+      - name: Install Linux WebView dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev patchelf
+      - run: cargo test --locked -p commission-types -p commission-client
+      - run: cargo check --locked -p commission-console --no-default-features --features desktop
   format:
     runs-on: ubuntu-latest
     steps:
@@ -38,3 +73,12 @@ jobs:
         with:
           components: rustfmt
       - run: cargo fmt --all -- --check
+  source:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: git archive --format=tar.gz -o "$RUNNER_TEMP/rs-commission-source.tar.gz" HEAD
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rs-commission-source
+          path: ${{ runner.temp }}/rs-commission-source.tar.gz

@@ -1,10 +1,7 @@
 FROM rust:1-bookworm AS build
 WORKDIR /app
-COPY Cargo.toml ./
-COPY src ./src
-COPY migrations ./migrations
-COPY web ./web
-RUN cargo build --release --bin commissiond
+COPY . .
+RUN cargo build --locked --release -p commission-rs --bin commissiond
 
 FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \

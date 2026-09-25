@@ -1,145 +1,115 @@
-# 分润台 / commission-rs
+# 分润台 · rs-commission
 
-Rust 编写的独立抽佣与返佣业务系统：平台抽佣、两级推广返佣、退款冲正、冻结解冻、提现结算记账与中文管理台。
+Rust 抽佣、推广返佣与结算系统。**0.2 将原生 JavaScript 管理台替换为 Dioxus Rust 前端，并使用共享 Rust 协议和 HTTP SDK。**
 
-> **交付状态：0.1.0 源码候选版，不是已验收的生产支付产品。**
-> 当前制作环境未安装 Rust/Cargo、PostgreSQL 或 Docker，外网下载工具链也不可用，因此没有执行 Rust 编译、数据库迁移、Rust 测试或容器构建。不能把“已实现源码”理解为“已编译、已联调、可直接处理真实资金”。实际检查范围见 [验证记录](docs/VERIFICATION.md)。
+> 开发中的资金业务系统，不是已审计的支付产品。实际覆盖和证据见 [验证记录](docs/VERIFICATION.md)。移动端配置、桌面编译检查不等于已签名安装包或真机验收。
 
-## 1. 业务范围与默认口径
-
-这是**一个平台、多商家、多推广员、CNY 单币种**的模块化单体，不是多 SaaS 租户系统，也不是商城。
-
-- 商家货款 = 实付金额 − 平台佣金池。
-- 平台佣金池 = `min(计佣基数, 可选封顶, floor(计佣基数 × 费率基点 ÷ 10000) + 固定费用)`。
-- 一级、二级推广佣金**从平台佣金池内分出**；不存在相应推广员时，该部分留在平台。
-- 平台净佣金 = 平台佣金池 − 一级推广佣金 − 二级推广佣金。
-- 费率变更创建新版本，历史订单保存规则与受益人快照；退款使用原分配，不重新匹配现行规则。
-- 退款按订单实付金额进行累计比例分摊，不是 SKU、数量或商品级退款。
-- 商家货款与佣金一起冻结，冻结期从**本系统成功入账的事务时间**起算，不从收货时间或上游支付时间起算。
-
-示例：实付 100 元，计佣基数 100 元，平台费率 10%，佣金池内一级返佣 30%、二级返佣 10%。
-
-| 收益方 | 金额 |
-|---|---:|
-| 商家货款 | 90.00 元 |
-| 平台净佣金 | 6.00 元 |
-| 一级推广员 | 3.00 元 |
-| 二级推广员 | 1.00 元 |
-| 合计 | 100.00 元 |
-
-## 2. 已写入源码的功能
-
-| 模块 | 功能 |
-|---|---|
-| 账户 | 商家、推广员、不可变上级关系、按账户隔离的成员访问 |
-| 规则 | 全局 / 商家覆盖、优先级、基数区间、按比例＋固定额、封顶、生效区间、停用、新版本 |
-| 计佣 | 试算、已支付订单入账、推广关系解析、规则和受益人快照 |
-| 退款 | 部分 / 全额退款、重复业务号拦截、累计分摊、解冻前后冲正、已提现后形成欠款 |
-| 余额 | 冻结、可用、提现占用三个分类；到期任务；负可用余额与后续收入抵扣 |
-| 提现 | 申请占用、独立凭据审核、执行登记、结果核验、未知结果保留占用、失败 / 驳回释放 |
-| 账本 | 双边平衡分录、提交时数据库平衡约束、禁止修改历史分录、余额投影 |
-| 一致性 | 事务内幂等记录、业务唯一键、行锁、审计、Outbox 租约领取与 ACK |
-| 运维 | 存活 / 就绪检查、JSON 日志、优雅停止、数据库迁移、容器与 GitHub Actions 配置 |
-| 界面 | 中文总览、账户、关系、规则、订单退款、分配、余额、结算、流水、审计、对账、令牌 |
-
-这里的账本是**业务分户账**，不是完整企业财务总账；支付清算对手账户也不代表已经核验的银行存款余额。
-
-## 3. 本次未接入、未声称完成的内容
-
-真实微信 / 支付宝 / Stripe / 银行接口、渠道回调验签、自动代付、外部账单导入与对账、开户实名认证、收款账户验证、税务代扣、发票、退款实际打款均未实现。提供的提现流程是“人工外部转账＋核验登记”，不会模拟渠道自动成功。
-
-也不包含：商城、商品级规则和退款、多币种换汇、多租户 SaaS、销售业绩阶梯提成、营销优惠分摊、实人身份权限系统、MFA、自动风控、监控告警平台、高可用部署或经过压测的性能承诺。二级返佣是技术能力，不是针对任何经营模式的合规判断。
-
-## 4. 技术结构
+## 架构
 
 ```text
-中文管理台 / 可信上游业务系统
-              │
-         Axum HTTP API
-              │
-  ┌───────────┼───────────┐
-  规则与关系   订单与退款    提现状态机
-  └───────────┼───────────┘
-        平衡分录 + 余额投影
-              │
-       PostgreSQL 事务
-  幂等记录 / 账本 / 审计 / Outbox
-              │
-      内置到期解冻任务
+commission-console (Dioxus Rust)
+    ├─ Web / WASM
+    ├─ Windows / macOS / Linux WebView
+    └─ Android / iOS WebView
+             │
+commission-client (Rust HTTP SDK, HTTPS, stable idempotency)
+             │ JSON /api/v1
+commissiond (Axum + Tokio)
+             │ SQLx / transaction
+PostgreSQL (ledger / wallets / audit / outbox)
+
+commission-types ← both client and server
+    Money / Terms / domain arithmetic / request and response models
 ```
 
-采用 Axum `0.8.9`、SQLx `0.8.6` 与 Tokio。SQLx **有意固定在 0.8.6**，不声称是最新版。查询使用参数绑定的运行时 SQL，不依赖编译时在线数据库检查。数据库 SQL 使用 PostgreSQL 特性，不支持用 SQLite 代替集成测试。
+Web、桌面、移动端复用 UI 源码；不是每个平台各写一套页面。客户端不直接连接数据库，不负责最终记账。共享包默认不包含数据库驱动；仅后端启用 `postgres` 映射。当前“多平台”指操作系统与浏览器，不表示多租户。
 
-前端是原生 HTML / CSS / JavaScript，由 Rust 二进制内嵌提供，不依赖 npm 构建或前端 CDN。核心服务、业务逻辑与任务均使用 Rust，没有引入 Python 服务或验证脚本。
+## 目录
 
-## 5. 本地启动
+| 路径 | 职责 |
+|---|---|
+| `src/` | Rust 后端、鉴权、事务、账本、业务服务 |
+| `crates/commission-types/` | 共用金额、规则、请求/响应、确定性计算 |
+| `crates/commission-client/` | Rust HTTP、错误处理、类型化写请求、幂等重试 |
+| `apps/console/` | 中文 Dioxus 前端和响应式 CSS |
+| `migrations/` | PostgreSQL 约束、触发器、表结构 |
+| `tests/` | 后端 PostgreSQL 集成测试 |
+| `deploy/` | 同源代理、生产数据库权限示例 |
 
-### Docker Compose
+后端继续是模块化单体；没有引入微服务、额外消息队列或客户端离线记账。
 
-需要本机已有 Docker Compose，且能访问镜像与 crates 源。
+## 本地启动
 
 ```bash
 cp .env.example .env
-# 将 .env 的密码替换为随机十六进制值，例如 openssl rand -hex 24 的输出。
-# 不要使用示例占位密码。
+# 将 POSTGRES_PASSWORD 改为随机十六进制密码，避免连接串转义问题。
 docker compose up --build -d
-
-# 首次运行：创建一次性展示的管理员令牌。
 docker compose exec app commissiond bootstrap
 ```
 
-浏览器打开 `http://127.0.0.1:8080`，使用输出 JSON 中的 `secret` 登录。**妥善保存令牌**，默认 90 天到期，服务不会将其写入普通启动日志。不要重复执行初始化。先创建独立运营、财务、集成凭据，再开展业务。
+后端现在监听 `http://127.0.0.1:8081`，根路径返回 API 信息，**不再提供旧 JS 页面**。保存初始化命令一次性输出的管理员令牌。
 
-Compose 只面向本机联调：数据库和 Web 端口均只绑定回环地址。PostgreSQL 18 数据卷使用 `/var/lib/postgresql`。首次迁移失败时，应用不会绕过迁移启动。不要对需要保留的数据运行 `docker compose down -v`。
-
-### 原生 Rust
-
-需要 Rust 工具链和 PostgreSQL。程序不自动加载 `.env`，请设置环境变量。
+安装 Rust stable、WASM target、Dioxus CLI（与框架一致）：
 
 ```bash
-export DATABASE_URL='postgres://commission:YOUR_HEX_PASSWORD@127.0.0.1:5432/commission'
-cargo generate-lockfile
-cargo fmt --all
-cargo build --locked
-cargo run --locked -- migrate
-cargo run --locked -- bootstrap
-cargo run --locked -- serve
+rustup target add wasm32-unknown-unknown
+cargo install dioxus-cli --version 0.7.10 --locked
+cd apps/console
+dx serve --platform web
 ```
 
-默认监听 `127.0.0.1:8080`。`BIND_ADDR` 可调整监听地址；`RELEASE_WORKER=false` 可关闭自动解冻以便测试。多实例都启用任务时通过 `FOR UPDATE SKIP LOCKED` 分摊到期订单。
+浏览器打开 `dx` 输出的地址，输入管理员令牌。开发代理把 `/api/` 转发到 `127.0.0.1:8081`。Web 客户端固定同源，不能在登录页随意改成第三方令牌接收地址。
 
-> 本次没有伪造 `Cargo.lock`。首次联网解析依赖后，应审查并提交生成的锁文件，再将 Docker 构建改为 `cargo build --locked`；正式镜像和 CI action 也应固定经过核验的 digest / commit。当前 Dockerfile 使用浮动 Rust 镜像，尚不构成可复现发布。
-
-## 6. 推荐演示顺序
-
-创建商家 → 创建上级推广员 → 创建直接推广员并设置上级 → 绑定客户 → 创建全局规则（联调可用 0 天冻结）→ 录入已支付订单 → 查看分配和余额 → 到期解冻 → 申请提现 → 换财务令牌审核和执行登记 → 核验外部结果 → 登记退款 → 查看欠款和内部对账。
-
-首笔提现不要用同一个凭据申请和审核。所谓双人控制在当前版本中是**凭据级分离**，不是已验证的自然人身份分离；管理员能签发多个令牌，组织仍需控制实际持有人及密钥权限。
-
-## 7. 测试
+完整 Web 容器部署配置：
 
 ```bash
-# 纯算术与类型测试，无须数据库
-cargo test --locked --lib
+docker compose --profile web up --build -d
+# 浏览器 http://127.0.0.1:8080
+```
 
-# PostgreSQL 集成测试；测试账号须能创建测试数据库
-export DATABASE_URL='postgres://postgres:YOUR_PASSWORD@127.0.0.1:5432/commission_test'
-cargo test --locked --test http_postgres
+此方式会构建 Dioxus CLI 与 WASM，配置是否实测见验证记录。生产必须在受信网关终止 HTTPS；不要直接把开发端口暴露公网。
 
-cargo clippy --locked --all-targets -- -D warnings
+## 桌面与移动
+
+在 `apps/console/` 下，选择一个 renderer，不要使用 `--all-features`：
+
+```bash
+# Windows / macOS / Linux，需各平台 WebView 系统依赖
+dx serve --platform desktop --no-default-features --features desktop
+
+# Android SDK + NDK + 模拟器/真机
+dx serve --platform android --no-default-features --features mobile
+
+# macOS + Xcode + iOS Simulator
+dx serve --platform ios --no-default-features --features mobile
+```
+
+原生端默认连接 `http://127.0.0.1:8081`，可在登录页配置 HTTPS 服务，或构建时设置 `COMMISSION_API_ORIGIN`。手机的 localhost 是手机自己，必须改成手机可访问的 HTTPS 服务。详见 [跨平台说明](docs/CROSS_PLATFORM.md)。
+
+## 已有业务与本次前端范围
+
+后台保留账户/推广关系、规则优先级与快照、订单计佣、累计部分退款、冻结/解冻、提现状态机、平衡分录、审计、内部对账、outbox 等首版逻辑。
+
+Rust 前端包含登录、13 类数据视图、分页、金额显示、服务器试算，以及 14 种写操作的**共享类型校验 + JSON 编辑 + 明确确认**流程。它是可迭代的工程操作台，**不是原 JS 界面每个专用表单的等价重制**。后续应逐步把高级 JSON 编辑替换成专用业务表单、筛选和详情页。
+
+金额使用整数分，JSON 使用字符串。支持负余额表达提现后退款形成的欠款；显示转换不用浮点。返佣从平台佣金池内部划分，不向商家重复扣费。
+
+写入先冻结请求内容和幂等键，再由用户确认。超时/5xx/响应不完整时保留原请求，不自动重试，不允许直接编辑为另一笔资金请求。令牌不写浏览器存储；待确认请求也仅存在当前会话，尚无跨重启恢复能力。
+
+**结算仍是外部人工转账后核验登记，不会自动代付。** 尚未接真实渠道、回调验签、外部账单对账、实人身份、税务与生产风控。
+
+## 验证
+
+```bash
+cargo test --locked -p commission-types -p commission-client
+# PostgreSQL 集成测试必须配置 DATABASE_URL
+cargo test --locked -p commission-rs --all-targets
+cargo clippy --locked -p commission-rs -p commission-types -p commission-client --all-targets -- -D warnings
+cargo check --locked -p commission-console --target wasm32-unknown-unknown --no-default-features --features web
+cargo check --locked -p commission-console --no-default-features --features desktop
 cargo fmt --all -- --check
-
-# 可选：Node.js 内置测试运行器，无 npm 依赖
-node --test tests/frontend.test.cjs
 ```
 
-集成测试由 SQLx 为每个测试分配隔离数据库；**不要把生产数据库或生产凭据作为测试连接**。CI 配置包含 PostgreSQL 服务，但本次没有触发或看到远程 CI 运行。
+CI 将后端、纯客户端、Web/WASM、三大桌面平台分开验证，避免 server 的 SQLx/Tokio 特性意外混入浏览器依赖。
 
-## 8. 文档
-
-- [业务与一致性设计](docs/ARCHITECTURE.md)
-- [接口与角色说明](docs/API.md)
-- [部署与资金操作手册](docs/OPERATIONS.md)
-- [实际验证记录和发布门禁](docs/VERIFICATION.md)
-
-项目许可证为 MIT；依赖许可证需随最终锁定依赖另行审查。
+文档：[API](docs/API.md) · [架构](docs/ARCHITECTURE.md) · [跨平台](docs/CROSS_PLATFORM.md) · [运维](docs/OPERATIONS.md) · [验证](docs/VERIFICATION.md)
