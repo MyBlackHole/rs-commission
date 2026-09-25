@@ -1,4 +1,4 @@
-# Temporary migration runner. Removed after the reviewed migration is normalized.
+# Temporary source migration runner; removed after normalization.
 name: Workspace migration
 on:
   push:
@@ -27,7 +27,12 @@ jobs:
           s = s.replace('Self::RequestPayout => &["operator", "finance", "member"]', 'Self::RequestPayout => &["operator", "member"]')
           p.write_text(s)
           p = Path('crates/commission-client/Cargo.toml')
-          s = p.read_text().replace('thiserror = "2"', 'thiserror = "2"\nurl = "2"')
+          s = p.read_text()
+          if '\nurl = ' not in s:
+              s = s.replace('thiserror = "2"', 'thiserror = "2"\nurl = "2"')
+          p.write_text(s)
+          p = Path('apps/console/src/main.rs')
+          s = p.read_text().replace('strong { "{content}" } } }\n', 'strong { "{content}" } } } }\n')
           p.write_text(s)
           p = Path('src/http/mod.rs')
           s = p.read_text().replace('response::{Html, IntoResponse, Response},\n', '')
@@ -46,7 +51,7 @@ jobs:
           test "$GITHUB_REF" = 'refs/heads/feat/rust-cross-platform'
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add Cargo.lock src crates apps web tests/frontend.test.cjs docs/FRONTEND_QA.json
+          git add -A
           git diff --cached --quiet || git commit -m 'chore: normalize Rust workspace and lock dependencies'
           git push origin HEAD:refs/heads/feat/rust-cross-platform
       - name: Snapshot normalized source
