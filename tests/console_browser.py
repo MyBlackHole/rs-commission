@@ -1,0 +1,117 @@
+"""Release-WASM browser smoke test; API fixtures, not a payment/backend E2E test.
+
+Python is test tooling only. All application/frontend/SDK logic remains Rust.
+Run after dx build with CONSOLE_WEB_ROOT pointing to its public directory.
+"""
+import functools
+import http.server
+import json
+import os
+from pathlib import Path
+import shutil
+import threading
+
+from playwright.sync_api import sync_playwright, expect
+
+ROOT = Path(os.environ.get("CONSOLE_WEB_ROOT", "target/dx/commission-console/release/web/public")).resolve()
+OUT = Path(os.environ.get("CONSOLE_QA_OUTPUT", "target/browser-qa")).resolve()
+OUT.mkdir(parents=True, exist_ok=True)
+assert (ROOT / "index.html").is_file(), "Build the release Web bundle first"
+CSP = "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'"
+
+
+class Handler(http.server.SimpleHTTPRequestHandler):
+    def end_headers(self):
+        self.send_header("Content-Security-Policy", CSP)
+        self.send_header("X-Content-Type-Options", "nosniff")
+        super().end_headers()
+
+    def log_message(self, *_args):
+        pass
+
+
+server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), functools.partial(Handler, directory=str(ROOT)))
+threading.Thread(target=server.serve_forever, daemon=True).start()
+base = f"http://127.0.0.1:{server.server_port}"
+requests, writes, errors = [], [], []
+uid = "11111111-1111-4111-8111-111111111111"
+actor = {"id": uid, "name": "测试管理员", "role": "admin", "account_id": None, "expires_at": "2099-01-01T00:00:00Z"}
+
+
+def api(route):
+    req = route.request
+    path = req.url.split("/api/v1/")[-1].split("?")[0]
+    requests.append({"method": req.method, "path": path})
+    status = 200
+    if path == "me":
+        data = actor
+    elif path == "dashboard":
+        data = {"order_count": 12, "paid_minor": "120000", "platform_net_minor": "7200", "available_minor": "111000", "frozen_minor": "9000", "reserved_minor": "0", "unknown_payouts": 0}
+    elif path == "quotes":
+        assert json.loads(req.post_data)["paid_minor"] == "10000"
+        data = {"binding": False, "fee_pool_minor": "1000", "platform_minor": "600", "direct_minor": "300", "indirect_minor": "100", "merchant_minor": "9000"}
+    elif req.method == "POST":
+        writes.append({"key": req.headers.get("idempotency-key"), "body": req.post_data, "url": req.url})
+        if len(writes) == 1:
+            status, data = 503, {"error": {"code": "retryable", "message": "测试：结果未知"}}
+        else:
+            data = {"id": uid, "external_id": "merchant-001", "name": "<img src=x onerror=alert(1)>", "kind": "merchant", "parent_id": None, "active": True, "created_at": "2026-09-25T00:00:00Z"}
+    elif path == "reconciliation":
+        data = {"ok": True, "external_payment_reconciled": False}
+    else:
+        data = {"items": [{"id": uid, "external_id": "demo-001", "name": "<img src=x onerror=alert(1)>", "available_minor": "9007199254740993", "status": "requested"}], "limit": 50, "offset": 0, "has_more": False}
+    route.fulfill(status=status, content_type="application/json", body=json.dumps(data, ensure_ascii=False))
+
+
+with sync_playwright() as p:
+    executable = os.environ.get("CONSOLE_BROWSER") or shutil.which("google-chrome") or shutil.which("chromium")
+    browser = p.chromium.launch(executable_path=executable, headless=True, args=["--no-sandbox"])
+    context = browser.new_context(viewport={"width": 1440, "height": 1050}, device_scale_factor=1)
+    page = context.new_page()
+    page.on("pageerror", lambda error: errors.append(str(error)))
+    page.route("**/api/v1/**", api)
+    page.goto(base, wait_until="networkidle")
+    page.screenshot(path=str(OUT / "login.png"), full_page=True)
+    expect(page.get_by_role("button", name="安全登录")).to_be_visible(timeout=15000)
+    page.locator("input[type=password]").fill("ui-fixture-only-not-a-real-token")
+    page.get_by_role("button", name="安全登录").click()
+    expect(page.get_by_text("测试管理员", exact=True)).to_be_visible()
+    expect(page.get_by_role("heading", name="业务总览", exact=True)).to_be_visible()
+    assert page.evaluate("localStorage.length===0 && sessionStorage.length===0")
+    page.screenshot(path=str(OUT / "overview-desktop.png"), full_page=True)
+    for title in ["账户管理", "推广关系", "抽佣规则", "订单管理", "佣金明细", "账户余额", "提现结算", "账本流水", "内部对账", "操作审计", "访问凭据", "可靠事件"]:
+        page.locator("nav").get_by_role("button", name=title, exact=True).click()
+        expect(page.get_by_role("heading", name=title, exact=True)).to_be_visible()
+        expect(page.get_by_text("正在读取服务器数据…")).to_have_count(0)
+    assert page.locator("img").count() == 0
+    page.locator("nav").get_by_role("button", name="佣金试算", exact=True).click()
+    panel = page.locator("section.panel").first
+    panel.locator("input").nth(0).fill(uid)
+    page.get_by_role("button", name="向服务器试算").click()
+    expect(panel.locator("pre")).to_contain_text("binding")
+    op = page.locator("section.operations")
+    op.get_by_role("button", name="校验并准备请求").click()
+    expect(op.locator("textarea")).to_be_disabled()
+    expect(op.get_by_role("button", name="确认提交", exact=True)).to_be_disabled()
+    op.locator("input[type=checkbox]").check()
+    op.get_by_role("button", name="确认提交", exact=True).click()
+    expect(op.get_by_role("button", name="以原幂等键重试")).to_be_visible()
+    expect(op.get_by_role("button", name="返回编辑 / 新操作")).to_be_disabled()
+    op.get_by_role("button", name="以原幂等键重试").click()
+    expect(op.get_by_role("button", name="返回编辑 / 新操作")).to_be_enabled()
+    assert len(writes) == 2 and writes[0]["key"] and writes[0] == writes[1]
+    assert page.locator("img").count() == 0
+    page.set_viewport_size({"width": 390, "height": 844})
+    page.locator("nav").get_by_role("button", name="业务总览", exact=True).click()
+    expect(page.get_by_role("heading", name="业务总览", exact=True)).to_be_visible()
+    page.screenshot(path=str(OUT / "overview-mobile.png"), full_page=True)
+    assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
+    page.get_by_role("button", name="退出并清除会话").click()
+    expect(page.get_by_role("button", name="安全登录")).to_be_visible()
+    assert page.locator("input[type=password]").input_value() == ""
+    assert not errors, errors
+    result = {"tested_ref": os.environ.get("GITHUB_SHA", "local"), "mode": "Chromium, release WASM, mocked API (not backend E2E)", "checks": ["CSP load", "login/logout", "no browser token persistence", "13 data views", "server quote payload", "escaped text", "prepare locks payload", "explicit confirmation", "503 preserves request", "same-key same-body retry", "390px responsive width"], "requests": len(requests), "writes": len(writes), "page_errors": errors}
+    (OUT / "result.json").write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+    browser.close()
+server.shutdown()

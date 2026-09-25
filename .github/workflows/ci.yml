@@ -1,5 +1,9 @@
 name: Rust workspace
-on: [push, pull_request, workflow_dispatch]
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
 permissions:
   contents: read
 concurrency:
@@ -31,6 +35,7 @@ jobs:
       - run: cargo clippy --locked -p commission-rs -p commission-types -p commission-client --all-targets -- -D warnings
   web:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -69,12 +74,25 @@ jobs:
           name: commission-console-web
           path: target/dx/commission-console/release/web/public
           if-no-files-found: error
+      - name: Prepare browser smoke tooling
+        run: |
+          python3 -m pip install playwright==1.57.0
+          command -v google-chrome || python3 -m playwright install --with-deps chromium
+          sudo apt-get update && sudo apt-get install -y fonts-noto-cjk
+      - name: Release browser smoke with fixture APIs
+        run: python3 tests/console_browser.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: browser-qa
+          path: target/browser-qa
   desktop:
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
