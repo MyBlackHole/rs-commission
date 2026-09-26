@@ -129,7 +129,9 @@ async fn native_bridge_reads_order_detail_through_the_fixed_api_surface() {
     let (address, seen) = server(vec![("200 OK", actor), ("200 OK", detail)]).await;
     let host = NativeBridge::default();
     let session = host.login(&address, "native-secret").await.unwrap();
-    assert!(!serde_json::to_string(&session).unwrap().contains("native-secret"));
+    assert!(!serde_json::to_string(&session)
+        .unwrap()
+        .contains("native-secret"));
     let value = host.order(session.id, order_id).await.unwrap();
     assert_eq!(value["order"]["external_id"], "order-001");
     let requests = seen.await.unwrap();
