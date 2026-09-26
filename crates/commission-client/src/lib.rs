@@ -1,5 +1,9 @@
 //! Shared HTTP SDK. Tokens and prepared writes are memory-only. No automatic
 //! financial retries: callers must retain and explicitly resend PreparedWrite.
+pub mod bridge;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod native;
+
 use commission_types::*;
 use reqwest::{
     header::{HeaderValue, AUTHORIZATION, CONTENT_TYPE},
@@ -9,7 +13,7 @@ use serde::{de::DeserializeOwned, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
 
-#[derive(Debug, Clone, thiserror::Error)]
+#[derive(Debug, Clone, thiserror::Error, serde::Serialize, serde::Deserialize)]
 pub enum ClientError {
     #[error("{0}")]
     Invalid(String),
@@ -84,7 +88,8 @@ pub const RESOURCES: &[(&str, &str)] = &[
 ];
 
 /// These match the backend API, not arbitrary URLs supplied by a UI.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Operation {
     CreateAccount,
     BindReferral,

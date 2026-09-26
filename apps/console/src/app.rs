@@ -1,5 +1,8 @@
 //! Shared Leptos CSR UI: identical components for browser and Tauri WebViews.
-use crate::{display::{display, label}, platform::{self, Client, Write}};
+use crate::{
+    display::{display, label},
+    platform::{self, Client, Write},
+};
 use commission_client::{bridge::WritePhase, Operation, RESOURCES};
 use commission_types::{Actor, Money, QuoteInput};
 use leptos::{prelude::*, reactive::owner::LocalStorage};
@@ -8,7 +11,10 @@ use uuid::Uuid;
 use wasm_bindgen_futures::spawn_local;
 
 #[derive(Clone)]
-struct Session { client: Client, actor: Actor }
+struct Session {
+    client: Client,
+    actor: Actor,
+}
 type Auth = RwSignal<Option<Session>, LocalStorage>;
 type ClientStore = StoredValue<Client, LocalStorage>;
 
@@ -108,19 +114,28 @@ fn Shell(session: Session, auth: Auth) -> impl IntoView {
 }
 
 #[component]
-fn ReadPanel(client: ClientStore, resource: RwSignal<String>, offset: RwSignal<u32>) -> impl IntoView {
+fn ReadPanel(
+    client: ClientStore,
+    resource: RwSignal<String>,
+    offset: RwSignal<u32>,
+) -> impl IntoView {
     let result = RwSignal::new(None::<std::result::Result<Value, String>>);
     let reload = RwSignal::new(0_u64);
     let generation = RwSignal::new(0_u64);
     Effect::new(move |_| {
-        let name = resource.get(); let at = offset.get(); let _ = reload.get();
+        let name = resource.get();
+        let at = offset.get();
+        let _ = reload.get();
         let version = generation.get_untracked().wrapping_add(1);
-        generation.set(version); result.set(None);
+        generation.set(version);
+        result.set(None);
         let client = client.get_value();
         spawn_local(async move {
             let value = client.resource(&name, at).await.map_err(|e| e.to_string());
             // An old request must never overwrite a newer page or a new session.
-            if generation.try_get_untracked() == Some(version) { result.set(Some(value)); }
+            if generation.try_get_untracked() == Some(version) {
+                result.set(Some(value));
+            }
         });
     });
     view! {
@@ -146,14 +161,28 @@ fn ReadPanel(client: ClientStore, resource: RwSignal<String>, offset: RwSignal<u
 fn DataView(value: Value) -> impl IntoView {
     let raw = serde_json::to_string_pretty(&value).unwrap_or_default();
     let content = if let Some(items) = value.get("items").and_then(Value::as_array) {
-        let keys: Vec<String> = items.first().and_then(Value::as_object).map(|v| v.keys().cloned().collect()).unwrap_or_default();
-        if items.is_empty() { view! { <p class="muted">"暂无记录"</p> }.into_any() }
-        else {
-            let headings = keys.iter().map(|k| view! { <th>{label(k).to_owned()}</th> }).collect_view();
-            let rows = items.iter().map(|item| {
-                let cells = keys.iter().map(|k| view! { <td>{display(k, &item[k])}</td> }).collect_view();
-                view! { <tr>{cells}</tr> }
-            }).collect_view();
+        let keys: Vec<String> = items
+            .first()
+            .and_then(Value::as_object)
+            .map(|v| v.keys().cloned().collect())
+            .unwrap_or_default();
+        if items.is_empty() {
+            view! { <p class="muted">"暂无记录"</p> }.into_any()
+        } else {
+            let headings = keys
+                .iter()
+                .map(|k| view! { <th>{label(k).to_owned()}</th> })
+                .collect_view();
+            let rows = items
+                .iter()
+                .map(|item| {
+                    let cells = keys
+                        .iter()
+                        .map(|k| view! { <td>{display(k, &item[k])}</td> })
+                        .collect_view();
+                    view! { <tr>{cells}</tr> }
+                })
+                .collect_view();
             view! { <div class="table-scroll"><table><thead><tr>{headings}</tr></thead><tbody>{rows}</tbody></table></div> }.into_any()
         }
     } else {
@@ -167,9 +196,12 @@ fn DataView(value: Value) -> impl IntoView {
 
 #[component]
 fn QuotePanel(client: ClientStore) -> impl IntoView {
-    let merchant = RwSignal::new(String::new()); let customer = RwSignal::new(String::new());
-    let paid = RwSignal::new("100.00".to_owned()); let base = RwSignal::new("100.00".to_owned());
-    let busy = RwSignal::new(false); let output = RwSignal::new(String::new());
+    let merchant = RwSignal::new(String::new());
+    let customer = RwSignal::new(String::new());
+    let paid = RwSignal::new("100.00".to_owned());
+    let base = RwSignal::new("100.00".to_owned());
+    let busy = RwSignal::new(false);
+    let output = RwSignal::new(String::new());
     view! {
         <section class="panel"><h2>"佣金试算"</h2><p class="muted">"仅查询服务器规则，不入账。金额单位：元。"</p>
             <form on:submit=move |e| {
@@ -205,12 +237,23 @@ fn QuotePanel(client: ClientStore) -> impl IntoView {
 
 #[component]
 fn Operations(client: ClientStore, actor: Actor, phase: RwSignal<WritePhase>) -> impl IntoView {
-    let allowed: Vec<_> = Operation::ALL.into_iter().filter(|op| op.allowed(&actor)).collect();
-    let Some(first) = allowed.first().copied() else { return view! { <p>"当前身份无写入权限"</p> }.into_any(); };
-    let operation = RwSignal::new(first); let body = RwSignal::new(first.example().to_owned());
-    let target = RwSignal::new(String::new()); let message = RwSignal::new(String::new());
-    let confirmed = RwSignal::new(false); let pending = RwSignal::new_local(None::<Write>);
-    let options = allowed.into_iter().map(|op| view! { <option value=op.label()>{op.label()}</option> }).collect_view();
+    let allowed: Vec<_> = Operation::ALL
+        .into_iter()
+        .filter(|op| op.allowed(&actor))
+        .collect();
+    let Some(first) = allowed.first().copied() else {
+        return view! { <p>"当前身份无写入权限"</p> }.into_any();
+    };
+    let operation = RwSignal::new(first);
+    let body = RwSignal::new(first.example().to_owned());
+    let target = RwSignal::new(String::new());
+    let message = RwSignal::new(String::new());
+    let confirmed = RwSignal::new(false);
+    let pending = RwSignal::new_local(None::<Write>);
+    let options = allowed
+        .into_iter()
+        .map(|op| view! { <option value=op.label()>{op.label()}</option> })
+        .collect_view();
     view! {
         <section class="panel operations"><h2>"业务操作"</h2>
             <p class="muted">"共享 Rust 类型校验。金额必须是以分为单位的字符串；所有授权由后端最终判定。"</p>

@@ -1,7 +1,7 @@
 """Release-WASM browser smoke test; API fixtures, not a payment/backend E2E test.
 
 Python is test tooling only. All application/frontend/SDK logic remains Rust.
-Run after dx build with CONSOLE_WEB_ROOT pointing to its public directory.
+Run after trunk build with CONSOLE_WEB_ROOT pointing to apps/console/dist.
 """
 import functools
 import http.server
@@ -13,7 +13,7 @@ import threading
 
 from playwright.sync_api import sync_playwright, expect
 
-ROOT = Path(os.environ.get("CONSOLE_WEB_ROOT", "target/dx/commission-console/release/web/public")).resolve()
+ROOT = Path(os.environ.get("CONSOLE_WEB_ROOT", "apps/console/dist")).resolve()
 OUT = Path(os.environ.get("CONSOLE_QA_OUTPUT", "target/browser-qa")).resolve()
 OUT.mkdir(parents=True, exist_ok=True)
 assert (ROOT / "index.html").is_file(), "Build the release Web bundle first"
