@@ -1,0 +1,54 @@
+name: One-time Leptos migration normalization
+on:
+  push:
+    branches: [feat/rust-cross-platform]
+    paths: ['.github/workflows/prepare-leptos.yml']
+permissions:
+  contents: write
+jobs:
+  normalize:
+    if: github.ref == 'refs/heads/feat/rust-cross-platform'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - name: Complete explicit SDK and test entrypoint migration
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('crates/commission-client/src/lib.rs')
+          s = p.read_text()
+          if 'pub mod bridge;' not in s:
+              s = s.replace('use commission_types::*;', 'pub mod bridge;\n#[cfg(not(target_arch = "wasm32"))]\npub mod native;\n\nuse commission_types::*;', 1)
+          s = s.replace('Clone, thiserror::Error)]', 'Clone, thiserror::Error, serde::Serialize, serde::Deserialize)]', 1)
+          s = s.replace('#[derive(Debug, Clone, Copy, PartialEq, Eq)]\npub enum Operation', '#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]\n#[serde(rename_all = "snake_case")]\npub enum Operation')
+          p.write_text(s)
+          p = Path('tests/console_browser.py')
+          s = p.read_text().replace('Run after dx build with CONSOLE_WEB_ROOT pointing to its public directory.', 'Run after trunk build with CONSOLE_WEB_ROOT pointing to apps/console/dist.')
+          s = s.replace('target/dx/commission-console/release/web/public', 'apps/console/dist')
+          p.write_text(s)
+          PY
+      - run: cargo fmt --all
+      - run: cargo update --workspace
+      - name: Commit only normalization to this migration branch, never main
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add --update
+          git add Cargo.lock
+          if ! git diff --cached --quiet; then
+            git commit -m 'build: normalize Leptos migration and lock workspace dependencies'
+            git push origin HEAD:refs/heads/feat/rust-cross-platform
+          fi
+      - name: Export source for review
+        if: always()
+        run: tar --exclude=.git --exclude=target -czf "$RUNNER_TEMP/leptos-source.tar.gz" .
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: leptos-normalized-source
+          path: ${{ runner.temp }}/leptos-source.tar.gz

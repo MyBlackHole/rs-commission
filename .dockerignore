@@ -3,4 +3,6 @@ target
 .env
 *.zip
 *.tar.gz
-**/.dioxus
+**/dist
+**/dist-tauri
+**/src-tauri/gen

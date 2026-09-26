@@ -1,15 +1,15 @@
-# Build from the repository root: docker build -f apps/console/Dockerfile .
+# Build from repository root. Frontend is a static Leptos CSR application.
 FROM rust:1-bookworm AS build
 RUN apt-get update && apt-get install -y --no-install-recommends pkg-config libssl-dev \
     && rm -rf /var/lib/apt/lists/*
 RUN rustup target add wasm32-unknown-unknown \
-    && cargo install dioxus-cli --version 0.7.10 --locked
+    && cargo install trunk --version 0.21.14 --locked
 WORKDIR /app
 COPY . .
 WORKDIR /app/apps/console
-RUN dx build --platform web --release
+RUN trunk build --release --locked
 
 FROM nginx:stable-alpine
 COPY deploy/console.nginx.conf /etc/nginx/conf.d/default.conf
-COPY --from=build /app/target/dx/commission-console/release/web/public /usr/share/nginx/html
+COPY --from=build /app/apps/console/dist /usr/share/nginx/html
 EXPOSE 80
