@@ -11,6 +11,7 @@ use commission_client::{ApiClient, PersistedWrite, PreparedWrite};
 #[cfg(not(feature = "tauri"))]
 use serde::{Deserialize, Serialize};
 
+#[cfg(not(feature = "tauri"))]
 const BROWSER_PENDING_KEY: &str = "rs-commission.pending-write.v1";
 
 #[derive(Clone)]
