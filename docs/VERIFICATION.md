@@ -1,29 +1,47 @@
-# 验证记录
+# 验证范围与证据
 
 ## 0.3 Leptos + Tauri
 
-迁移从 `61396be` 开始，提交新的 Leptos 页面、Tauri 宿主、原生桥接状态和测试，保留后端账务实现与数据库迁移。
+本轮从 0.2 的 `61396be` 迁移。替换页面、宿主与构建配置；后端账务源码和数据库迁移保留。Cargo.lock 已更新，Dioxus 依赖已移除；一次性格式化/锁定依赖的写权限 workflow 已删除，正式 CI 为 contents:read。
 
-依赖锁定和格式化已由一次性迁移任务完成；该临时写权限 workflow 已删除。正式 CI contents:read，不自动改写源码。
+**每个提交的通过/失败结果以 PR #1 对应 Actions 与产物为准。本文件列出验收范围，不能把测试代码存在等同于通过。**
 
-**本文件提交时正在进行迁移后 CI。不要把下面的测试目标视为已经通过；本次对应结果见 PR #1 与该提交的 Actions。**
+## 测试分层
 
-| 验证项 | 本版目标与边界 |
+| 层次 | 检查内容 |
 |---|---|
-| 后端与共享 SDK | 保留 37 个基线测试，并新增 1 个状态单元测试、2 个原生桥 HTTP 测试 |
-| PostgreSQL | 21 个真实 PostgreSQL 集成测试，非前端模拟数据 |
-| Web | WASM check/Clippy、Trunk release、无后端依赖泄漏 |
-| Tauri UI | 同一 Leptos 源码按 tauri transport 生成另一份 WASM |
-| 浏览器 | Chromium 真实 release WASM；使用模拟 HTTP API，不是全链路 E2E |
-| 桌面 | Windows/macOS/Linux cargo build 链接 Tauri 宿主并嵌入 Leptos 资源；不等同窗口交互或安装器 |
-| 手机 | 仅代码入口和配置；Android/iOS 未编译或真机验收 |
+| Rust 测试 | 40 个：10 个共享金额/领域测试，4 个 SDK/状态单元测试，3 个传输测试，2 个原生桥测试，21 个 PostgreSQL 集成测试 |
+| PostgreSQL | 使用真实 PostgreSQL 18 容器；并发幂等、退款/解冻、欠款、提现、账本约束等 |
+| Web | Leptos WASM check/Clippy，Trunk release，依赖隔离与锁文件不变 |
+| Tauri 页面 | 同一 UI 按 tauri feature 构建；仍是 WASM，不是原生控件 |
+| 浏览器 | Chromium 加载 release WASM，在部署 CSP 下运行 HTTP API 夹具回归 |
+| IPC 传输 | Chromium 加载 tauri-feature release WASM，使用七个本地命令夹具验证 JSON 编码、句柄、503 解码和重试；不是 Tauri 真实运行时 |
+| 桌面 | Windows/macOS/Linux 上执行 SDK 测试、cargo build 链接 Tauri 并嵌入 Leptos 资源、后端 cargo check |
 
-新增原生测试涵盖会话隔离、令牌不返回界面、结果未知不可丢弃/换账号、同键同体重试、IPC 结果丢失重放缓存、资源白名单与角色限制。UI 不替代服务器鉴权。
+原生桥测试覆盖会话隔离、令牌不返回 UI、未知结果不能覆盖/丢弃/切换账号、同键同体重试、已知结果在 IPC 丢失后缓存重放，以及资源白名单和角色限制。服务器仍执行最终授权。
 
-浏览器回归测试验证同源 API 请求、13 类视图、金额显示、服务器试算、文本转义、准备/确认门禁、503 原请求重试和 390px 布局。Python/Playwright 仅作测试工具，不参与产品运行。
+浏览器回归覆盖登录退出、不持久化令牌、13 类视图、服务器试算、转义文本、请求准备/确认、503 保留原请求、同键重试、分页 offset 前进/返回、无 Rust 模板片段泄露、390px 页面宽度。
 
-尚未验证：真实浏览器—服务器—数据库完整联调、原生 IPC 窗口交互、中文 IME、手机生命周期、签名和安装包、Docker 双镜像启动、性能/安全审计、支付接入。跨进程重启的请求恢复尚未实现。
+## 本轮发现并修复
 
-## 历史基线：0.2 Dioxus（不是 0.3 的通过证据）
+首轮 `081cf44` 的 40 个 Rust 测试和 Web 构建/既有回归通过，但截图人工复核发现分页按钮把未加花括号的 >= 表达式解析成文本；因此首轮的成功不作为 UI 完成证明。已将该属性表达式显式包裹，并补充下一页/上一页实际请求断言。普通资源页采用稳定 Show 分支，避免切换列表时重建整个 ReadPanel。
 
-`61396be` / Actions run `36146240005` 曾通过 7 个 CI job、37 个 Rust 测试及 Dioxus Web 浏览器回归。此后已更换 UI 和宿主，必须重新执行上面的检查。历史源码仍可通过 Git 提交查看。
+新增 tests/tauri_transport_browser.py 专门覆盖实际 IPC 传输版 WASM。它使用测试命令，不代表原生窗口的权限、系统 WebView 和生命周期已经验收。Python/夹具 JavaScript 只作测试工具。
+
+## 证据获取
+
+PR：https://github.com/MyBlackHole/rs-commission/pull/1
+
+每次 CI 产物包括 rs-commission-source、commission-console-web、commission-console-tauri-assets 和 browser-qa。browser-qa 中 result.json 记录 Web 用例，tauri-transport-result.json 记录 IPC 夹具用例，截图用于人工复核。GITHUB_SHA 在 PR CI 中可能是合并测试提交，不代表已合并 main。
+
+本次本地 Chromium 访问回环 HTTP 被环境管理员策略阻止，未将本地尝试列为成功；浏览器实际验证使用 GitHub Actions runner，不修改或绕过本地浏览器策略。
+
+## 尚未覆盖 / 不可据此上线
+
+Android/iOS 编译、模拟器/真机、移动生成工程、软键盘与后台恢复；桌面窗口 IPC 真联调、IME、安装包、签名与更新；完整浏览器—真实后端—PostgreSQL E2E；Docker 双镜像启动；容量/安全审计与真实支付渠道。
+
+待确认请求仍只存内存，强制关闭/系统回收后无跨重启恢复。未知时禁用退出按钮不是持久化保障。产品仍为外部人工转账后的核验登记，禁止直接用于真实资金。
+
+## 历史基线
+
+Dioxus 0.2：`61396be` / run `36146240005` 曾通过 7 个 job、37 个 Rust 测试及旧 UI 回归。只供追溯，不可替代 Leptos/Tauri 验证。

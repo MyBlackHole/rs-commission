@@ -106,8 +106,10 @@ fn Shell(session: Session, auth: Auth) -> impl IntoView {
             </header>
             <p class="error" role="alert">{move || error.get()}</p>
             <p class="notice">"外部人工转账模式：登记执行不会自动付款。结果未知时不能退出或另建请求；请保留幂等键核验，勿关闭程序。"</p>
-            {move || if view.get() == "quote" { view! { <QuotePanel client/> }.into_any() }
-                else { view! { <ReadPanel client resource=view offset/> }.into_any() }}
+            <Show when=move || view.get() == "quote"
+                fallback=move || view! { <ReadPanel client resource=view offset/> }>
+                <QuotePanel client/>
+            </Show>
             <Operations client actor=session.actor phase/>
         </main></div>
     }
@@ -150,7 +152,7 @@ fn ReadPanel(
             <div class="pagination">
                 <button class="secondary" disabled=move || offset.get() == 0 on:click=move |_| offset.update(|v| *v = v.saturating_sub(50))>"上一页"</button>
                 <span>{move || format!("偏移 {} · 每页 50 条", offset.get())}</span>
-                <button class="secondary" disabled=move || offset.get() >= 1_000_000 || !result.get().and_then(|r| r.ok()).and_then(|v| v.get("has_more").and_then(Value::as_bool)).unwrap_or(false)
+                <button class="secondary" disabled={move || offset.get() >= 1_000_000 || !result.get().and_then(|r| r.ok()).and_then(|v| v.get("has_more").and_then(Value::as_bool)).unwrap_or(false)}
                     on:click=move |_| offset.update(|v| *v += 50)>"下一页"</button>
             </div>
         </section>
