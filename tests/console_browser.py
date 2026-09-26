@@ -182,10 +182,24 @@ with sync_playwright() as p:
     expect(op.get_by_role("button", name="以原幂等键重试")).to_be_visible()
     expect(op.get_by_role("button", name="返回编辑 / 新操作")).to_be_disabled()
     expect(page.get_by_role("button", name="退出并清除会话")).to_be_disabled()
-    op.get_by_role("button", name="以原幂等键重试").click()
-    expect(op.get_by_role("button", name="返回编辑 / 新操作")).to_be_enabled()
-    op.get_by_role("button", name="返回编辑 / 新操作").click()
-    expect(op.locator("textarea")).to_be_enabled()
+    stored = page.evaluate("localStorage.getItem('rs-commission.pending-write.v1')")
+    assert stored and "ui-fixture-only-not-a-real-token" not in stored
+
+    # Simulate a browser/process boundary: credentials are gone, durable retry material remains.
+    page.reload(wait_until="networkidle")
+    expect(page.get_by_role("button", name="安全登录")).to_be_visible(timeout=15000)
+    assert page.locator("input[type=password]").input_value() == ""
+    page.locator("input[type=password]").fill("ui-fixture-only-not-a-real-token")
+    page.get_by_role("button", name="安全登录").click()
+    expect(page.get_by_role("heading", name="恢复未完成写请求", exact=True)).to_be_visible()
+    recovered = page.locator(".recovery-panel")
+    expect(recovered).to_contain_text("Idempotency-Key:")
+    recovered.locator("input[type=checkbox]").check()
+    recovered.get_by_role("button", name="以原幂等键重试", exact=True).click()
+    expect(recovered.get_by_role("button", name="清除恢复记录", exact=True)).to_be_enabled()
+    recovered.get_by_role("button", name="清除恢复记录", exact=True).click()
+    expect(page.get_by_role("heading", name="恢复未完成写请求", exact=True)).to_have_count(0)
+    assert page.evaluate("localStorage.length===0")
     expect(page.locator("nav").get_by_role("button", name="业务总览", exact=True)).to_be_enabled()
     generic_pair = [w for w in writes if w["url"].endswith("/api/v1/accounts")]
     assert len(generic_pair) == 2 and generic_pair[0]["key"] and generic_pair[0] == generic_pair[1]
@@ -200,7 +214,7 @@ with sync_playwright() as p:
     expect(page.get_by_role("button", name="安全登录")).to_be_visible()
     assert page.locator("input[type=password]").input_value() == ""
     assert not errors, errors
-    result = {"tested_ref": os.environ.get("GITHUB_SHA", "local"), "mode": "Chromium, release WASM, mocked API (not backend E2E)", "checks": ["CSP load", "login/logout", "no browser token persistence", "13 data views", "dedicated order detail", "dedicated refund confirmation and same-key retry", "dedicated payout detail and same-key approval retry", "pagination advances and reverses offset", "no template expression leakage", "server quote payload", "escaped text", "prepare locks payload", "explicit confirmation", "503 preserves request and prevents logout", "same-key same-body retry", "390px responsive width"], "requests": len(requests), "writes": len(writes), "page_errors": errors}
+    result = {"tested_ref": os.environ.get("GITHUB_SHA", "local"), "mode": "Chromium, release WASM, mocked API (not backend E2E)", "checks": ["CSP load", "login/logout", "no browser token persistence", "13 data views", "dedicated order detail", "dedicated refund confirmation and same-key retry", "dedicated payout detail and same-key approval retry", "pagination advances and reverses offset", "no template expression leakage", "server quote payload", "escaped text", "prepare locks payload", "explicit confirmation", "503 preserves request and prevents logout", "same-key same-body retry", "browser reload restores original pending write without persisting token", "390px responsive width"], "requests": len(requests), "writes": len(writes), "page_errors": errors}
     (OUT / "result.json").write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
     print(json.dumps(result, ensure_ascii=False, indent=2))
     browser.close()
