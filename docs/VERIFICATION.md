@@ -10,18 +10,18 @@
 
 | 层次 | 检查内容 |
 |---|---|
-| Rust 测试 | 40 个：10 个共享金额/领域测试，4 个 SDK/状态单元测试，3 个传输测试，2 个原生桥测试，21 个 PostgreSQL 集成测试 |
+| Rust 测试 | 41 个：10 个共享金额/领域测试，4 个 SDK/状态单元测试，3 个传输测试，3 个原生桥测试，21 个 PostgreSQL 集成测试 |
 | PostgreSQL | 使用真实 PostgreSQL 18 容器；并发幂等、退款/解冻、欠款、提现、账本约束等 |
 | Web | Leptos WASM check/Clippy，Trunk release，依赖隔离与锁文件不变 |
 | Tauri 页面 | 同一 UI 按 tauri feature 构建；仍是 WASM，不是原生控件 |
 | 浏览器夹具 | Chromium 加载 release WASM，在部署 CSP 下运行 HTTP API 夹具回归 |
 | 真实 Web E2E | Chromium → Nginx 同源入口 → Axum → PostgreSQL；真实登录、订单详情/退款、提现详情/审核，不 mock API |
-| IPC 传输 | Chromium 加载 tauri-feature release WASM，使用七个本地命令夹具验证 JSON 编码、句柄、503 解码和重试；不是 Tauri 真实运行时 |
+| IPC 传输 | Chromium 加载 tauri-feature release WASM，使用十个限定本地命令夹具验证 JSON 编码、句柄、恢复查询、503 解码和重试；不是 Tauri 真实运行时 |
 | 桌面 | Windows/macOS/Linux 上执行 SDK 测试、cargo build 链接 Tauri 并嵌入 Leptos 资源、后端 cargo check |
 
-原生桥测试覆盖会话隔离、令牌不返回 UI、未知结果不能覆盖/丢弃/切换账号、同键同体重试、已知结果在 IPC 丢失后缓存重放，以及资源白名单和角色限制。服务器仍执行最终授权。
+原生桥测试覆盖会话隔离、令牌不返回 UI、未知结果不能覆盖/丢弃/切换账号、同键同体重试、已知结果在 IPC 丢失后缓存重放、资源白名单和角色限制；新增用临时恢复文件重建 NativeBridge，验证 503 后进程重建仍以完全相同请求重试。服务器仍执行最终授权。
 
-浏览器夹具回归覆盖登录退出、不持久化令牌、13 类视图、服务器试算、转义文本、请求准备/确认、503 保留原请求、同键重试、分页 offset 前进/返回、无 Rust 模板片段泄露、390px 页面宽度。
+浏览器夹具回归覆盖登录退出、不持久化令牌、13 类视图、服务器试算、转义文本、请求准备/确认、503 保留原请求、同键重试、页面 reload 后重新登录并恢复原 key/body、恢复记录不含测试令牌、分页 offset 前进/返回、无 Rust 模板片段泄露、390px 页面宽度。
 
 真实 Web E2E 不注册 Playwright route mock：测试通过 Nginx 同源入口访问 release WASM 和真实 Axum API，数据库为 PostgreSQL 18。它创建真实临时管理员/财务业务数据，使用专用订单页面登记退款并验证持久化，再用财务凭据通过专用提现页面审核提现并验证最终状态。E2E 密钥只保存在 CI 环境和内存中，不写产物。
 
@@ -43,7 +43,7 @@ PR：https://github.com/MyBlackHole/rs-commission/pull/1
 
 Android/iOS 编译、模拟器/真机、移动生成工程、软键盘与后台恢复；桌面窗口 IPC 真联调、IME、安装包、签名与更新；Docker 双镜像启动；容量/安全审计与真实支付渠道。真实 Web E2E 已覆盖一条退款和一条提现审核路径，但不等于所有异常状态、并发条件或支付渠道已经完成端到端验收。
 
-待确认请求仍只存内存，强制关闭/系统回收后无跨重启恢复。未知时禁用退出按钮不是持久化保障。产品仍为外部人工转账后的核验登记，禁止直接用于真实资金。
+已覆盖 Web reload 与 NativeBridge 重建后的单笔请求恢复，但尚未做真实 Tauri 窗口强杀/重启 E2E、OS 存储损坏/权限异常矩阵和移动后台回收验证。恢复材料包含业务请求体，本地静态保密依赖浏览器同源/操作系统账户边界，并非硬件密钥库。产品仍为外部人工转账后的核验登记，禁止直接用于真实资金。
 
 ## 历史基线
 
