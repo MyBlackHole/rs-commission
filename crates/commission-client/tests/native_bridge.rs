@@ -1,5 +1,5 @@
 #![cfg(not(target_arch = "wasm32"))]
-use commission_client::{native::NativeBridge, Operation};
+use commission_client::{bridge::WritePhase, native::NativeBridge, Operation};
 use tokio::{
     io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader},
     net::TcpListener,
@@ -137,4 +137,57 @@ async fn native_bridge_reads_order_detail_through_the_fixed_api_surface() {
     let requests = seen.await.unwrap();
     assert_eq!(requests.len(), 2);
     assert!(requests[1].starts_with(&format!("GET /api/v1/orders/{order_id} HTTP/1.1")));
+}
+
+
+#[tokio::test]
+async fn native_bridge_recovers_same_write_after_process_restart() {
+    let actor = r#"{"id":"11111111-1111-4111-8111-111111111111","name":"test","role":"admin","account_id":null,"expires_at":"2099-01-01T00:00:00Z"}"#;
+    let (address, seen) = server(vec![
+        ("200 OK", actor),
+        (
+            "503 Service Unavailable",
+            r#"{"error":{"code":"busy","message":"retry"}}"#,
+        ),
+        ("200 OK", actor),
+        ("200 OK", r#"{"done":true}"#),
+    ])
+    .await;
+    let path = std::env::temp_dir().join(format!(
+        "rs-commission-pending-{}.json",
+        Uuid::new_v4()
+    ));
+
+    let original_key = {
+        let host = NativeBridge::persistent(path.clone()).unwrap();
+        let session = host.login(&address, "native-secret").await.unwrap();
+        let write = host
+            .prepare(session.id, Operation::Release, Some(Uuid::nil()), "{}")
+            .unwrap();
+        let key = write.key.clone();
+        assert!(host
+            .execute(session.id, write.id)
+            .await
+            .unwrap_err()
+            .outcome_unknown());
+        assert!(path.is_file());
+        key
+    };
+
+    let host = NativeBridge::persistent(path.clone()).unwrap();
+    let session = host.login(&address, "native-secret").await.unwrap();
+    let recovered = host.recover(session.id).unwrap().unwrap();
+    assert_eq!(recovered.phase, WritePhase::Unknown);
+    assert_eq!(recovered.receipt.key, original_key);
+    assert_eq!(
+        host.execute(session.id, recovered.receipt.id).await.unwrap()["done"],
+        true
+    );
+    host.discard(session.id, recovered.receipt.id).unwrap();
+    assert!(!path.exists());
+    host.logout(session.id).unwrap();
+
+    let requests = seen.await.unwrap();
+    assert_eq!(requests.len(), 4);
+    assert_eq!(requests[1], requests[3]);
 }
