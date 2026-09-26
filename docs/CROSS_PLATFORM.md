@@ -1,57 +1,65 @@
-# Rust 跨平台架构（0.2）
+# Leptos + Tauri 多端架构（0.3）
 
-## 平台边界
+## 一份 UI，两类宿主
 
-| 目标 | 渲染与网络 | 本轮验证目标 |
+所有业务页面位于 `apps/console/src/app.rs`，CSS 共用。Leptos CSR 在浏览器和 Tauri WebView 中都运行 WASM，不在手机附带本地数据库或完整服务器。当前不需要 SSR 服务、Node 运行时或每端独立前端。
+
+| 平台 | 页面 | 调用路径 |
 |---|---|---|
-| Web | Dioxus WASM + 浏览器 fetch；同源 `/api/v1` | WASM 编译、Clippy、依赖隔离检查 |
-| Windows | Dioxus 桌面 WebView2 + Rust HTTP | Windows runner 上的 SDK 测试和桌面编译 |
-| macOS | Dioxus 桌面 WKWebView + Rust HTTP | macOS runner 上的 SDK 测试和桌面编译 |
-| Linux | Dioxus 桌面 WebKitGTK + Rust HTTP | Linux runner 上的 SDK 测试和桌面编译 |
-| Android | Dioxus mobile + 平台 WebView + Rust HTTP | 提供入口和配置；SDK/NDK、APK、真机尚待验证 |
-| iOS | Dioxus mobile + WKWebView + Rust HTTP | 提供入口和配置；Xcode、签名、真机尚待验证 |
+| Web | Leptos WASM / DOM | platform.rs → Rust SDK → 同源 fetch → API |
+| Windows | 同一 Leptos UI / WebView2 | platform.rs → 限定 IPC → Rust 宿主 SDK → HTTPS |
+| macOS | 同一 Leptos UI / WKWebView | 同上 |
+| Linux | 同一 Leptos UI / WebKitGTK | 同上 |
+| Android | 同一 Leptos UI / Android WebView | Tauri 移动入口，仍待编译/设备验证 |
+| iOS | 同一 Leptos UI / WKWebView | Tauri 移动入口，仍待编译/设备验证 |
 
-表中是构建设计，不是测试结果；实际结果以 `VERIFICATION.md` 和 PR 对应提交的 CI 为准。编译通过也不证明窗口、键盘、网络、证书、安装包签名与应用商店分发已经完成。
+表格描述代码与目标，不表示已经生成各平台安装包。真实结果见 VERIFICATION.md 与对应 CI。浏览器测试不能替代 WebView、中文输入法、软键盘、安全区和生命周期验证。
 
-前端业务代码是 Rust；CSS 负责样式；Web 发布物仍包含工具链生成的 JS/WASM 启动文件。桌面/移动使用系统 WebView，不宣称采用原生控件或零 JavaScript 运行时。
+## 依赖与构建
 
-## 依赖方向
+`console → client → types`；`shell → client → types`；`server → types`。只有 server 启用 types/postgres。`console` 的 tauri feature 只切换 IPC 传输，不把 tauri crate 或系统依赖编进 WASM。
 
-`console → client → types`，`server → types`。只有 server 启用 types 的 `postgres` feature，添加 SQLx 映射实现。共享 types 中的角色辅助判断用于 UI 提示；不能替代服务端鉴权。
-
-不要执行 `cargo build --workspace --all-features`：不同 renderer 是互斥部署目标；SQLx 原生映射也不应被合并到 WASM。CI 对目标分别调用 cargo。
-
-UI 不复制计佣业务规则。试算调用后端，订单实际入账仍使用后端选出的规则/受益人快照。共享纯计算仅作为同一规则实现及测试基础，不能让客户端结果成为记账凭据。
-
-## 平台开发
-
-统一依赖：Rust stable、Dioxus CLI 0.7.10。Web 额外需要 `wasm32-unknown-unknown`。Linux 桌面需要 WebKitGTK 4.1、libxdo、OpenSSL 开发包等；Windows 需要 WebView2 Runtime；macOS/iOS 使用系统 WebKit 与 Xcode 工具链。Android 需要 SDK、NDK 和可用设备。
-
-从 `apps/console` 运行：
+固定 Leptos 0.8.20、Tauri 2.11.6、tauri-build 2.6.3、Trunk 0.21.14；开发 CLI 使用 tauri-cli 2.11.4。框架 crate 与 CLI 版本号不必相同，均提交或明确固定。锁文件不能在 CI 每次重新随机生成。
 
 ```bash
-dx serve --platform web
-dx serve --platform desktop --no-default-features --features desktop
-dx serve --platform android --no-default-features --features mobile
-dx serve --platform ios --no-default-features --features mobile
+# apps/console 中
+trunk serve
+trunk build --release --locked
+cargo tauri dev
+cargo tauri build --no-bundle
 ```
 
-生成发行包使用相同平台选择配合 `dx bundle`，但本轮不提供“已签名/已上架”的承诺。Android/iOS 应使用受信 HTTPS API，不要启用任意明文传输或全局跳过证书验证。
+独立 Web 产物为 dist；Tauri 产物为 dist-tauri，通过 Trunk `--features tauri` 生成。不能把 Web transport 的 dist 放进原生宿主，也不能把 dist-tauri 当独立网站发布：它依赖 Tauri IPC。
 
-## 网络与凭据
+默认 bundle.active=false，CI 验证桌面程序编译链接，不声称验证 MSI/DMG/APK/IPA 或上架。后续分发阶段再补正式图标、签名、安装器和更新机制。
 
-Web 在当前页面源下访问 `/api/v1`，开发通过 Dioxus proxy，部署通过 Nginx。默认不启用跨域 CORS，不使用 `Access-Control-Allow-Origin: *` 配合资金接口。
+## 移动开发
 
-桌面/移动直接连接 Rust API。SDK 拒绝非回环 HTTP、带用户名/密码/路径/查询串的服务源。原生 HTTP 禁止自动重定向，禁止库级透明重试；浏览器遵循同源部署与 CSP。
+Android 需 SDK、NDK、对应 Rust targets、JDK 和设备，先 `cargo tauri android init`。iOS 需 macOS、Xcode、开发者签名配置，先 `cargo tauri ios init`。生成目录在 src-tauri/gen，未作为已验证工程提交。
 
-令牌在内存中，HeaderValue 标记 sensitive；无 localStorage、无明文配置文件。令牌仍可能被拥有设备进程权限的人读取；本轮没有声称达到硬件密钥保护。
+设备需要可访问的前端开发服务器；默认 localhost:1420 只适合本机桌面开发。使用 Tauri 移动开发指引配置 host/devUrl、网络访问和热更新端口。API 必须为手机可达、证书可信的 HTTPS 服务。不要使用任意明文传输或全局跳过证书校验。
 
-写请求生成一次 key 和规范化 JSON，保存为不可编辑 PreparedWrite，并绑定 SDK 会话。超时、5xx、无法解析成功响应均不等同于失败。前端保留原请求供显式重试，服务端进行最终幂等判断。
+## 原生最小能力接口
 
-已知边界：待确认请求不跨程序重启保存，切换账号后也不允许直接复用前一账号的 PreparedWrite。上线前需加入受控的请求日志、跨重启核验入口和按业务编号/幂等键定位记录的专用页面。
+只开放 session_login、session_logout、read_resource、quote_commission、prepare_write、execute_write、discard_write 七个命令。
 
-## 后续迭代顺序
+自定义 AppManifest 显式登记命令，capabilities 仅关联本地 main 窗口；未授权远程源、通用 HTTP、Shell 或文件系统。宿主不暴露 SQL、不负责最终资金鉴权，不接受任意 URL 的代理请求。读取资源由 SDK 白名单校验。
 
-先完成真实 Web/桌面交互验收和专用业务表单；再完成账户范围筛选、订单/提现详情与请求恢复；随后做移动端模拟器、键盘/安全区/后台切换和安装包验证；最后接真实支付渠道与外部对账。不要先堆新模块而跳过账务与客户端状态验证。
+登录后 native::NativeBridge 持有 ApiClient、令牌、Actor 和最多一笔待确认请求。界面只收到随机会话 ID、随机请求 ID、幂等键和业务路径。PreparedWrite 和 bearer 不可序列化到 UI。输入令牌时仍经过 WebView，进程内存也不是硬件保护区。
 
-参考：Dioxus 官方 0.7 文档 https://dioxuslabs.com/learn/0.7/getting_started/ ，0.7.10 features https://docs.rs/crate/dioxus/0.7.10/features ，Reqwest WASM 说明 https://docs.rs/reqwest/latest/reqwest/ 。
+未知写请求禁止覆盖、退出登录或丢弃。重复 execute 使用相同 key/body；终态结果缓存处理 IPC 丢失。不同会话无法调用旧句柄，过时登录/查询响应会被丢弃。Mutex 仅保护状态转换，不跨网络 await。
+
+## 已知边界
+
+没有本地持久请求日志，强杀、系统回收或页面刷新会丢失 UI 状态。禁止退出按钮不是完整生命周期安全措施。正式接资金前必须加入可审计的跨重启核验机制，而不是把内存当可靠队列。
+
+浏览器端令牌暂存 WASM 所属页面内存；原生端登录后的长期令牌在 Rust 宿主内存；两者都不写 localStorage/sessionStorage。CSP 不允许任意业务网络源；生产应通过 HTTPS 网关与后端授权保证边界。
+
+## 资料
+
+- https://v2.tauri.app/start/frontend/leptos/
+- https://v2.tauri.app/start/frontend/
+- https://v2.tauri.app/security/capabilities/
+- https://v2.tauri.app/develop/calling-rust/
+- https://docs.rs/leptos/0.8.20/leptos/
+- https://trunk-rs.github.io/trunk/guide/configuration/index.html
