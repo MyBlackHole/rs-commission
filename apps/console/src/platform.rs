@@ -1,7 +1,5 @@
 //! Only transport differs by target. Components never call Tauri or fetch directly.
-use commission_client::{
-    bridge::WritePhase, ClientError, Operation, Result,
-};
+use commission_client::{bridge::WritePhase, ClientError, Operation, Result};
 use commission_types::{Actor, QuoteInput};
 use serde_json::Value;
 use uuid::Uuid;
