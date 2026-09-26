@@ -51,7 +51,7 @@ Android 需 SDK、NDK、对应 Rust targets、JDK 和设备，先 `cargo tauri a
 
 ## 已知边界
 
-已有单笔本地恢复记录，但尚未完成真实 Tauri 窗口强杀/重启、移动后台回收、磁盘损坏与权限异常的端到端矩阵。若恢复记录缺失或损坏，客户端拒绝猜测或生成替代请求，仍需按业务号和服务端状态人工核验。本机制不是服务端可靠资金队列。
+单笔本地恢复记录已在 Linux 上通过真实 Tauri/WebKitGTK 生命周期 E2E：503 后 SIGKILL commission-shell，再启动新宿主并重新认证，恢复原 path/body/idempotency key 后重试。尚未覆盖 Windows/macOS WebDriver 生命周期、移动后台回收、磁盘损坏与权限异常矩阵。若恢复记录缺失或损坏，客户端拒绝猜测或生成替代请求，仍需按业务号和服务端状态人工核验。本机制不是服务端可靠资金队列。
 
 浏览器端令牌暂存 WASM 所属页面内存；原生端登录后的令牌在 Rust 宿主内存；两者都不把 bearer 写 localStorage/sessionStorage。Web 的待恢复写请求会写同源 localStorage，Tauri 写应用数据目录，因此业务请求体的本地保密依赖浏览器同源和操作系统账户边界。CSP 不允许任意业务网络源；生产应通过 HTTPS 网关与后端授权保证边界。
 

@@ -4,7 +4,7 @@
 
 `apps/console` 是 Leptos CSR Rust 前端；`apps/console/src-tauri` 是薄原生宿主；`commission-client` 是共用 HTTP SDK；`commission-types` 是共用金额、请求/响应和确定性计算。后端保持模块化单体：HTTP 解析和鉴权，service 编排事务，domain 执行纯计算，ledger 统一记账。只有后端启用共享类型的 PostgreSQL 映射；前端不引入 SQLx 或服务器运行时。
 
-Web、桌面、移动入口共享界面源码。Leptos 在浏览器和 Tauri WebView 中均运行 WASM；原生 Rust 宿主通过七个限定 IPC 命令管理会话与 HTTP。CSS 负责样式，bootstrap.js 仅加载 WASM。不是原生控件，也不是零 JavaScript 引导文件。实际平台验证状态见 VERIFICATION.md。
+Web、桌面、移动入口共享界面源码。Leptos 在浏览器和 Tauri WebView 中均运行 WASM；原生 Rust 宿主通过十个限定 IPC 命令管理会话与 HTTP。CSS 负责样式，bootstrap.js 仅加载 WASM。不是原生控件，也不是零 JavaScript 引导文件。实际平台验证状态见 VERIFICATION.md。
 
 一个平台、多商家、多推广员、CNY 单币种。这不是多 SaaS 租户系统或完整商城。内部角色能读取整个平台；member 只能访问绑定账户。客户端不直接连接数据库，不允许离线资金记账。不引入 Redis 锁、消息代理或微服务。
 
@@ -102,7 +102,7 @@ SDK PreparedWrite 冻结路径、规范化请求体和 key 并绑定会话，并
 
 Tauri NativeBridge 持有令牌和最多一笔活动待确认请求；UI 只持有随机句柄。恢复记录写入应用数据目录，保存 origin、actor id、operation/target、规范化 body、idempotency key 与 attempted 标记，不保存令牌。执行时先持久化 attempted=true，再锁内转换状态、锁外请求网络；已确认终态缓存可重放，防止 IPC 响应丢失导致重复网络执行。资源名受白名单约束；本地角色判断不代替后端鉴权。
 
-未知结果和执行中禁止丢弃请求或退出登录。Web 用同源 localStorage、Tauri 用应用数据文件保存最多一笔恢复记录；刷新或进程重启后重新认证同一 origin + actor 才能恢复。未进入发送边界的 Prepared 请求可明确放弃；attempted 请求恢复为 Unknown，只能用原 key/body 重试。若本地恢复存储被删除或损坏，客户端不会猜测或生成替代请求，仍需人工按业务号/服务端状态核验。
+未知结果和执行中禁止丢弃请求或退出登录。Web 用同源 localStorage、Tauri 用应用数据文件保存最多一笔恢复记录；刷新或进程重启后重新认证同一 origin + actor 才能恢复。未进入发送边界的 Prepared 请求可明确放弃；attempted 请求恢复为 Unknown，只能用原 key/body 重试。Linux CI 通过真实 commission-shell + WebKitWebDriver，在收到 503 后 SIGKILL 宿主并启动新进程，验证新会话从同一 app-data 恢复并发送完全相同的 path/key/body。若本地恢复存储被删除或损坏，客户端不会猜测或生成替代请求，仍需人工按业务号/服务端状态核验。
 
 Outbox 与业务同提交，消费者租约 claim、成功后 ACK；旧租约不能确认新领取。已处理未 ACK 可重投，消费者须按 event.id 幂等。ACK 不递归产生事件；没有自动 Webhook、死信、记录清理或归档。
 
