@@ -166,7 +166,7 @@ with sync_playwright() as p:
     payout_pair = [w for w in writes if w["url"].endswith(f"/payouts/{payout_id}/approve")]
     assert len(payout_pair) == 2 and payout_pair[0]["key"] and payout_pair[0] == payout_pair[1]
     approve.get_by_role("button", name="完成并刷新提现", exact=True).click()
-    expect(page.get_by_text("已审核", exact=True)).to_be_visible()
+    expect(page.locator(".payout-detail .status-chip")).to_have_text("已审核")
 
     page.locator("nav").get_by_role("button", name="佣金试算", exact=True).click()
     panel = page.locator("section.panel").first
