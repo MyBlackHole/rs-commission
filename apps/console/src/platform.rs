@@ -132,6 +132,20 @@ impl Client {
             .await
         }
     }
+    pub async fn payout(&self, payout_id: Uuid) -> Result<Value> {
+        #[cfg(not(feature = "tauri"))]
+        {
+            self.inner.payout(payout_id).await
+        }
+        #[cfg(feature = "tauri")]
+        {
+            invoke(
+                "payout_detail",
+                serde_json::json!({"session": self.id,"payout": payout_id}),
+            )
+            .await
+        }
+    }
     pub async fn prepare(
         &self,
         operation: Operation,

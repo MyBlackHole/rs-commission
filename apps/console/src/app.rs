@@ -118,6 +118,13 @@ fn Shell(session: Session, auth: Auth) -> impl IntoView {
                         can_refund
                     />
                 }.into_any(),
+                "payouts" => view! {
+                    <crate::payouts::PayoutsPanel
+                        client
+                        phase
+                        actor=session.actor.clone()
+                    />
+                }.into_any(),
                 _ => view! { <ReadPanel client resource=view offset/> }.into_any(),
             }}
             <Operations client actor=session.actor phase/>
@@ -251,7 +258,16 @@ fn QuotePanel(client: ClientStore) -> impl IntoView {
 fn Operations(client: ClientStore, actor: Actor, phase: RwSignal<WritePhase>) -> impl IntoView {
     let allowed: Vec<_> = Operation::ALL
         .into_iter()
-        .filter(|op| op.allowed(&actor))
+        .filter(|op| {
+            op.allowed(&actor)
+                && !matches!(
+                    op,
+                    Operation::ApprovePayout
+                        | Operation::ProcessPayout
+                        | Operation::RejectPayout
+                        | Operation::PayoutOutcome
+                )
+        })
         .collect();
     let Some(first) = allowed.first().copied() else {
         return view! { <p>"当前身份无写入权限"</p> }.into_any();

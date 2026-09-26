@@ -50,6 +50,7 @@ admin 可管理全部，但不能用申请凭据审核自己的提现。
 | GET | `/commissions` | 分配与累计退回，含商家货款 |
 | GET | `/ledger` | 不可变分录 |
 | GET / POST | `/payouts` | 列表 / 提现申请 |
+| GET | `/payouts/{id}` | 提现详情；member 仅能读取绑定账户 |
 | POST | `/payouts/{id}/approve` | 独立凭据审核 |
 | POST | `/payouts/{id}/processing` | 登记开始外部执行 |
 | POST | `/payouts/{id}/reject` | 未执行前驳回 |

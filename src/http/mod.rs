@@ -59,6 +59,7 @@ pub fn router(state: AppState) -> Router {
         .route("/commissions", get(list_commissions))
         .route("/ledger", get(list_ledger))
         .route("/payouts", get(list_payouts).post(request_payout))
+        .route("/payouts/{id}", get(payout))
         .route("/payouts/{id}/approve", post(approve_payout))
         .route("/payouts/{id}/processing", post(process_payout))
         .route("/payouts/{id}/reject", post(reject_payout))
@@ -127,6 +128,13 @@ async fn order(
     Path(id): Path<Uuid>,
 ) -> Result<Json<Value>> {
     Ok(Json(queries::order(&s.pool, &a, id).await?))
+}
+async fn payout(
+    State(s): State<AppState>,
+    Extension(a): Extension<Actor>,
+    Path(id): Path<Uuid>,
+) -> Result<Json<Value>> {
+    Ok(Json(queries::payout(&s.pool, &a, id).await?))
 }
 async fn reconciliation(
     State(s): State<AppState>,

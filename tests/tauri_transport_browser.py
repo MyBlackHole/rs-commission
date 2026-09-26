@@ -30,6 +30,7 @@ stub = r'''
 (() => {
  const id='11111111-1111-4111-8111-111111111111';
  const write='22222222-2222-4222-8222-222222222222';
+ const payout='33333333-3333-4333-8333-333333333333';
  let attempts=0;
  window.fixtureCalls=[];
  window.__TAURI__={core:{invoke:async(command,args)=>{
@@ -37,9 +38,14 @@ stub = r'''
    if (!args || args.constructor!==Object) throw 'IPC arguments must be JSON objects';
    if(command==='session_login') return {id,actor:{id,name:'IPC测试管理员',role:'admin',account_id:null,expires_at:'2099-01-01T00:00:00Z'}};
    if(args.session!==id) throw 'wrong session';
-   if(command==='read_resource') { if(args.resource==='orders') return {items:[{id,external_id:'order-001',paid_minor:'10000',refunded_minor:'0',captured_at:'2026-09-25T00:00:00Z',released_at:null}],has_more:false,offset:0,limit:50}; return {items:[],has_more:false,offset:0,limit:50}; }
+   if(command==='read_resource') {
+     if(args.resource==='orders') return {items:[{id,external_id:'order-001',paid_minor:'10000',refunded_minor:'0',captured_at:'2026-09-25T00:00:00Z',released_at:null}],has_more:false,offset:0,limit:50};
+     if(args.resource==='payouts') return {items:[{id:payout,external_id:'payout-001',amount_minor:'300',destination_ref:'verified-payee-001',status:'succeeded',provider_reference:'BANK-1',evidence:'核验完成',created_at:'2026-09-25T00:00:00Z',updated_at:'2026-09-25T01:00:00Z'}],has_more:false,offset:0,limit:50};
+     return {items:[],has_more:false,offset:0,limit:50};
+   }
    if(command==='quote_commission') return {binding:false,fee_pool_minor:'1000'};
    if(command==='order_detail') { if(args.order!==id) throw 'wrong order handle'; return {order:{id,external_id:'order-001',paid_minor:'10000',refunded_minor:'0',fee_pool_minor:'1000',unlock_at:'2026-10-02T00:00:00Z',rule_snapshot:{}},allocations:[],refunds:[]}; }
+   if(command==='payout_detail') { if(args.payout!==payout) throw 'wrong payout handle'; return {id:payout,external_id:'payout-001',amount_minor:'300',destination_ref:'verified-payee-001',status:'succeeded',provider_reference:'BANK-1',evidence:'核验完成',created_at:'2026-09-25T00:00:00Z',updated_at:'2026-09-25T01:00:00Z'}; }
    if(command==='prepare_write') {
      if(args.operation!=='create_account' || typeof args.body!=='string' || args.target!==null) throw 'wrong prepare shape';
      return {id:write,key:'same-idempotency-key',path:'accounts'};
@@ -74,6 +80,11 @@ try:
         page.get_by_role("button", name="查看详情", exact=True).click()
         expect(page.get_by_role("heading", name="订单详情", exact=True)).to_be_visible()
         expect(page.locator("article.metric").filter(has_text="实付金额").locator("strong")).to_have_text("¥ 100.00")
+        page.locator("nav").get_by_role("button", name="提现结算", exact=True).click()
+        expect(page.get_by_role("button", name="查看详情", exact=True)).to_be_visible()
+        page.get_by_role("button", name="查看详情", exact=True).click()
+        expect(page.get_by_role("heading", name="提现详情", exact=True)).to_be_visible()
+        expect(page.get_by_text("BANK-1", exact=True)).to_be_visible()
         page.locator("nav").get_by_role("button", name="佣金试算", exact=True).click()
         panel = page.locator("section.panel").first
         panel.locator("input").nth(0).fill("11111111-1111-4111-8111-111111111111")
@@ -96,7 +107,7 @@ try:
         expect(page.get_by_role("button", name="安全登录")).to_be_visible()
         calls = page.evaluate("window.fixtureCalls")
         methods = [c["command"] for c in calls]
-        assert set(methods) == {"session_login", "session_logout", "read_resource", "quote_commission", "order_detail", "prepare_write", "execute_write", "discard_write"}, methods
+        assert set(methods) == {"session_login", "session_logout", "read_resource", "quote_commission", "order_detail", "payout_detail", "prepare_write", "execute_write", "discard_write"}, methods
         executes = [c for c in calls if c["command"] == "execute_write"]
         assert len(executes) == 2 and executes[0] == executes[1]
         assert all("token" not in c["args"] for c in calls[1:])

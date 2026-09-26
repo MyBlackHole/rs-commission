@@ -39,6 +39,8 @@ base = f"http://127.0.0.1:{server.server_port}"
 requests, writes, errors = [], [], []
 write_attempts = {}
 uid = "11111111-1111-4111-8111-111111111111"
+payout_id = "33333333-3333-4333-8333-333333333333"
+payout_state = {"status": "requested"}
 actor = {"id": uid, "name": "测试管理员", "role": "admin", "account_id": None, "expires_at": "2099-01-01T00:00:00Z"}
 
 
@@ -63,6 +65,10 @@ def api(route):
             "allocations": [{"order_id": uid, "ordinal": 0, "account_id": uid, "slot": "merchant", "original_minor": "9000", "refunded_minor": "2250"}, {"order_id": uid, "ordinal": 1, "account_id": uid, "slot": "platform", "original_minor": "1000", "refunded_minor": "250"}],
             "refunds": [{"id": uid, "external_id": "refund-001", "amount_minor": "2500", "cumulative_minor": "2500", "reason": "首次退款", "allocation_deltas": [], "created_at": "2026-09-25T01:00:00Z"}]
         }
+    elif path == "payouts" and req.method == "GET":
+        data = {"items": [{"id": payout_id, "external_id": "payout-001", "account_id": uid, "amount_minor": "300", "destination_ref": "verified-payee-001", "status": payout_state["status"], "requested_by": uid, "approved_by": None, "provider_reference": None, "evidence": None, "created_at": "2026-09-25T00:00:00Z", "updated_at": "2026-09-25T00:00:00Z"}], "limit": 50, "offset": offset, "has_more": False}
+    elif path == f"payouts/{payout_id}" and req.method == "GET":
+        data = {"id": payout_id, "external_id": "payout-001", "account_id": uid, "amount_minor": "300", "destination_ref": "verified-payee-001", "status": payout_state["status"], "requested_by": uid, "approved_by": None, "provider_reference": None, "evidence": None, "created_at": "2026-09-25T00:00:00Z", "updated_at": "2026-09-25T00:00:00Z"}
     elif req.method == "POST":
         writes.append({"key": req.headers.get("idempotency-key"), "body": req.post_data, "url": req.url})
         write_attempts[path] = write_attempts.get(path, 0) + 1
@@ -70,6 +76,9 @@ def api(route):
             status, data = 503, {"error": {"code": "retryable", "message": "测试：结果未知"}}
         elif path.endswith("/refunds"):
             data = {"id": uid, "external_id": "refund-002", "amount_minor": "1000", "cumulative_minor": "3500"}
+        elif path.endswith("/approve"):
+            payout_state["status"] = "approved"
+            data = {"id": payout_id, "external_id": "payout-001", "amount_minor": "300", "status": "approved"}
         else:
             data = {"id": uid, "external_id": "merchant-001", "name": "<img src=x onerror=alert(1)>", "kind": "merchant", "parent_id": None, "active": True, "created_at": "2026-09-25T00:00:00Z"}
     elif path == "reconciliation":
@@ -140,6 +149,25 @@ with sync_playwright() as p:
     refund.get_by_role("button", name="完成并刷新订单", exact=True).click()
     expect(page.locator("nav").get_by_role("button", name="业务总览", exact=True)).to_be_enabled()
 
+    # Dedicated payout detail and approval workflow.
+    page.locator("nav").get_by_role("button", name="提现结算", exact=True).click()
+    expect(page.get_by_role("button", name="查看详情", exact=True)).to_be_visible()
+    page.get_by_role("button", name="查看详情", exact=True).click()
+    expect(page.get_by_role("heading", name="提现详情", exact=True)).to_be_visible()
+    expect(page.get_by_text("待审核", exact=True)).to_be_visible()
+    approve = page.locator(".payout-action").filter(has_text="通过审核")
+    approve.get_by_role("button", name="准备通过审核", exact=True).click()
+    approve.locator("input[type=checkbox]").check()
+    approve.get_by_role("button", name="确认提交", exact=True).click()
+    expect(approve.get_by_role("button", name="以原幂等键重试", exact=True)).to_be_visible()
+    expect(page.get_by_role("button", name="退出并清除会话")).to_be_disabled()
+    approve.get_by_role("button", name="以原幂等键重试", exact=True).click()
+    expect(approve.get_by_role("button", name="完成并刷新提现", exact=True)).to_be_visible()
+    payout_pair = [w for w in writes if w["url"].endswith(f"/payouts/{payout_id}/approve")]
+    assert len(payout_pair) == 2 and payout_pair[0]["key"] and payout_pair[0] == payout_pair[1]
+    approve.get_by_role("button", name="完成并刷新提现", exact=True).click()
+    expect(page.get_by_text("已审核", exact=True)).to_be_visible()
+
     page.locator("nav").get_by_role("button", name="佣金试算", exact=True).click()
     panel = page.locator("section.panel").first
     panel.locator("input").nth(0).fill(uid)
@@ -172,7 +200,7 @@ with sync_playwright() as p:
     expect(page.get_by_role("button", name="安全登录")).to_be_visible()
     assert page.locator("input[type=password]").input_value() == ""
     assert not errors, errors
-    result = {"tested_ref": os.environ.get("GITHUB_SHA", "local"), "mode": "Chromium, release WASM, mocked API (not backend E2E)", "checks": ["CSP load", "login/logout", "no browser token persistence", "13 data views", "dedicated order detail", "dedicated refund confirmation and same-key retry", "pagination advances and reverses offset", "no template expression leakage", "server quote payload", "escaped text", "prepare locks payload", "explicit confirmation", "503 preserves request and prevents logout", "same-key same-body retry", "390px responsive width"], "requests": len(requests), "writes": len(writes), "page_errors": errors}
+    result = {"tested_ref": os.environ.get("GITHUB_SHA", "local"), "mode": "Chromium, release WASM, mocked API (not backend E2E)", "checks": ["CSP load", "login/logout", "no browser token persistence", "13 data views", "dedicated order detail", "dedicated refund confirmation and same-key retry", "dedicated payout detail and same-key approval retry", "pagination advances and reverses offset", "no template expression leakage", "server quote payload", "escaped text", "prepare locks payload", "explicit confirmation", "503 preserves request and prevents logout", "same-key same-body retry", "390px responsive width"], "requests": len(requests), "writes": len(writes), "page_errors": errors}
     (OUT / "result.json").write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
     print(json.dumps(result, ensure_ascii=False, indent=2))
     browser.close()
