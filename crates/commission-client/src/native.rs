@@ -95,8 +95,8 @@ impl NativeBridge {
     }
 
     fn decode_store(bytes: &[u8]) -> Result<StoredPending> {
-        let pending: StoredPending =
-            serde_json::from_slice(bytes).map_err(|_| invalid("本地待恢复请求损坏；请先核验服务器状态"))?;
+        let pending: StoredPending = serde_json::from_slice(bytes)
+            .map_err(|_| invalid("本地待恢复请求损坏；请先核验服务器状态"))?;
         if pending.version != STORE_VERSION {
             return Err(invalid("本地待恢复请求版本不兼容；请先核验服务器状态"));
         }
@@ -125,8 +125,7 @@ impl NativeBridge {
             fs::create_dir_all(parent).map_err(|_| invalid("无法创建本地恢复目录"))?;
         }
         let next = Self::next_path(path);
-        let bytes =
-            serde_json::to_vec(pending).map_err(|_| invalid("无法编码本地待恢复请求"))?;
+        let bytes = serde_json::to_vec(pending).map_err(|_| invalid("无法编码本地待恢复请求"))?;
         let mut file = OpenOptions::new()
             .create(true)
             .truncate(true)
@@ -166,7 +165,12 @@ impl NativeBridge {
         let generation = Uuid::new_v4();
         {
             let mut state = self.lock()?;
-            if state.session.as_ref().and_then(|s| s.pending.as_ref()).is_some() {
+            if state
+                .session
+                .as_ref()
+                .and_then(|s| s.pending.as_ref())
+                .is_some()
+            {
                 return Err(invalid("存在待处理请求，不能更换会话"));
             }
             if state
@@ -240,10 +244,13 @@ impl NativeBridge {
     pub fn recover(&self, id: Uuid) -> Result<Option<RecoveredWriteReceipt>> {
         let state = self.lock()?;
         let session = state.session(id)?;
-        Ok(session.pending.as_ref().map(|pending| RecoveredWriteReceipt {
-            receipt: pending.receipt.clone(),
-            phase: pending.phase,
-        }))
+        Ok(session
+            .pending
+            .as_ref()
+            .map(|pending| RecoveredWriteReceipt {
+                receipt: pending.receipt.clone(),
+                phase: pending.phase,
+            }))
     }
 
     fn client(&self, id: Uuid) -> Result<ApiClient> {
