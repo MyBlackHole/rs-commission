@@ -1,55 +1,47 @@
-# 验证记录
+# 验证范围与证据
 
-日期：2026-09-25。候选版本：0.1.0。
+## 0.3 Leptos + Tauri
 
-## 环境限制与未执行项
+本轮从 0.2 的 `61396be` 迁移。替换页面、宿主与构建配置；后端账务源码和数据库迁移保留。Cargo.lock 已更新，Dioxus 依赖已移除；一次性格式化/锁定依赖的写权限 workflow 已删除，正式 CI 为 contents:read。
 
-制作环境没有 rustc、cargo、PostgreSQL 或 Docker。Rust 下载地址在本地 DNS 解析失败，下载工具也未能取得工具链。以下事项未运行，不得报告通过：
+**每个提交的通过/失败结果以 PR #1 对应 Actions 与产物为准。本文件列出验收范围，不能把测试代码存在等同于通过。**
 
-- Rust 编译、rustfmt、Clippy、Cargo 依赖解析与安全审计。
-- PostgreSQL 迁移、触发器、事务和数据库锁行为。
-- Rust 单元、属性与数据库集成测试。
-- Docker 构建、Compose 启动、远程 GitHub Actions。
-- 真实支付、退款、出款、渠道回调和外部对账。
+## 测试分层
 
-## 已执行
+| 层次 | 检查内容 |
+|---|---|
+| Rust 测试 | 40 个：10 个共享金额/领域测试，4 个 SDK/状态单元测试，3 个传输测试，2 个原生桥测试，21 个 PostgreSQL 集成测试 |
+| PostgreSQL | 使用真实 PostgreSQL 18 容器；并发幂等、退款/解冻、欠款、提现、账本约束等 |
+| Web | Leptos WASM check/Clippy，Trunk release，依赖隔离与锁文件不变 |
+| Tauri 页面 | 同一 UI 按 tauri feature 构建；仍是 WASM，不是原生控件 |
+| 浏览器 | Chromium 加载 release WASM，在部署 CSP 下运行 HTTP API 夹具回归 |
+| IPC 传输 | Chromium 加载 tauri-feature release WASM，使用七个本地命令夹具验证 JSON 编码、句柄、503 解码和重试；不是 Tauri 真实运行时 |
+| 桌面 | Windows/macOS/Linux 上执行 SDK 测试、cargo build 链接 Tauri 并嵌入 Leptos 资源、后端 cargo check |
 
-- `node --check web/app.js`：语法检查通过。
-- `node --test tests/frontend.test.cjs`：5 项通过，0 失败。
-- 已人工检查核心账务路径、快照、幂等作用域、退款分摊、未知提现状态和角色权限。人工检查不替代编译或集成测试。
+原生桥测试覆盖会话隔离、令牌不返回 UI、未知结果不能覆盖/丢弃/切换账号、同键同体重试、已知结果在 IPC 丢失后缓存重放，以及资源白名单和角色限制。服务器仍执行最终授权。
 
-浏览器检查采用下文注明的离线方式；没有注明通过的事项不得推断为已验证。
+浏览器回归覆盖登录退出、不持久化令牌、13 类视图、服务器试算、转义文本、请求准备/确认、503 保留原请求、同键重试、分页 offset 前进/返回、无 Rust 模板片段泄露、390px 页面宽度。
 
-## 已编写但未运行的 Rust 测试
+## 本轮发现并修复
 
-金额字符串与边界、封顶与零基数、无推广关系、分配守恒、累计退款单调性、全额精确冲正、随机和逐分金额；完整订单到退款欠款链；同键重复及 12 路并发；同键异请求；业务单号重复；超额退款；新规则不重算旧单；商家规则覆盖；解冻期限；退款解冻并发；提现并发防超支；未知结果保留占用；退款后禁止审核；凭据分离；成员隔离；审计员只读；账本不可修改；不平衡提交回滚；Outbox 租约；凭据不泄露；客户禁止补绑；到期任务重复执行。
+首轮 `081cf44` 的 40 个 Rust 测试和 Web 构建/既有回归通过，但截图人工复核发现分页按钮把未加花括号的 >= 表达式解析成文本；因此首轮的成功不作为 UI 完成证明。已将该属性表达式显式包裹，并补充下一页/上一页实际请求断言。普通资源页采用稳定 Show 分支，避免切换列表时重建整个 ReadPanel。
 
-代码存在不代表测试通过。共 29 个 Rust 测试函数：domain.rs 7 个、money.rs 1 个、http_postgres.rs 21 个；全部未运行。
+新增 tests/tauri_transport_browser.py 专门覆盖实际 IPC 传输版 WASM。它使用测试命令，不代表原生窗口的权限、系统 WebView 和生命周期已经验收。Python/夹具 JavaScript 只作测试工具。
 
-## 发布门禁
+## 证据获取
 
-1. 联网解析、审查并提交 Cargo.lock，锁定工具链和镜像。
-2. 执行 cargo fmt、build、Clippy 及全部 Rust 测试，修复所有问题。
-3. 验证 PostgreSQL 迁移、触发器、并发和回滚。
-4. 使用独立运行角色验证 API 权限、HTTPS、代理限制与凭据轮换。
-5. 渠道沙箱补齐验签、重复回调、未知结果恢复、外部账单核对。
-6. 完成业务口径、安全、性能及恢复验收，再决定上线。
+PR：https://github.com/MyBlackHole/rs-commission/pull/1
 
-## 离线浏览器检查：已执行
+每次 CI 产物包括 rs-commission-source、commission-console-web、commission-console-tauri-assets 和 browser-qa。browser-qa 中 result.json 记录 Web 用例，tauri-transport-result.json 记录 IPC 夹具用例，截图用于人工复核。GITHUB_SHA 在 PR CI 中可能是合并测试提交，不代表已合并 main。
 
-使用本机 Chromium 和 Playwright，将本项目实际 HTML/CSS/JavaScript 从本地文件装入离线页面，用模拟 fetch 响应提供数据。由于环境浏览器策略禁止访问本地 URL，**没有通过 Rust 或真实 HTTP 服务进行端到端验证**。离线页面不具备安全源，因此仅在测试上下文补充了 randomUUID；未修改生产浏览器的原生实现。
+本次本地 Chromium 访问回环 HTTP 被环境管理员策略阻止，未将本地尝试列为成功；浏览器实际验证使用 GitHub Actions runner，不修改或绕过本地浏览器策略。
 
-执行并通过：
+## 尚未覆盖 / 不可据此上线
 
-- 桌面 1440px 与手机 390px 视口的登录、总览显示；手机文档宽度为 390px，没有整页横向溢出。已检查截图并修正手机金额换行。
-- 模拟令牌登录、清空令牌输入、退出时清空应用令牌；13 个导航页均能够渲染。
-- 含脚本标签的账户名按纯文本显示，没有插入 script 节点或触发弹窗。
-- 模拟 503 后表单锁定；重试发送与首次完全相同的载荷和 Idempotency-Key。
-- 订单商家选择框默认值、试算显示及 100.00 元提交为字符串 `10000` 分。
-- 以上交互没有未处理的 JavaScript 异常。
+Android/iOS 编译、模拟器/真机、移动生成工程、软键盘与后台恢复；桌面窗口 IPC 真联调、IME、安装包、签名与更新；完整浏览器—真实后端—PostgreSQL E2E；Docker 双镜像启动；容量/安全审计与真实支付渠道。
 
-此检查**不覆盖**真实鉴权、数据库、事务、并发、渠道调用、HTTPS、CSP 响应头或任何线上安全承诺。列表空态与账户列表被实际交互检查，不代表每种业务状态和每种按钮均完成浏览器验收。机器可读摘要见 [FRONTEND_QA.json](FRONTEND_QA.json)。
+待确认请求仍只存内存，强制关闭/系统回收后无跨重启恢复。未知时禁用退出按钮不是持久化保障。产品仍为外部人工转账后的核验登记，禁止直接用于真实资金。
 
-## 文件检查：已执行
+## 历史基线
 
-`Cargo.toml` 通过 Python 标准库 TOML 解析。这仅表示 TOML 结构可读，不表示 Rust 依赖存在、版本兼容或项目可编译。源文件引用、内部 Markdown 文档路径及压缩包内容在交付时进行存在性检查。
+Dioxus 0.2：`61396be` / run `36146240005` 曾通过 7 个 job、37 个 Rust 测试及旧 UI 回归。只供追溯，不可替代 Leptos/Tauri 验证。

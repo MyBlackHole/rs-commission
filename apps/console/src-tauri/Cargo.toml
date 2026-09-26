@@ -1,0 +1,22 @@
+[package]
+name = "commission-shell"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "commission_shell"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[features]
+custom-protocol = ["tauri/custom-protocol"]
+
+[dependencies]
+commission-client = { path = "../../../crates/commission-client" }
+commission-types = { path = "../../../crates/commission-types" }
+tauri = { version = "=2.11.6", features = [] }
+serde_json = "1"
+uuid = { version = "1", features = ["serde"] }
+
+[build-dependencies]
+tauri-build = { version = "=2.6.3", features = [] }

@@ -1,145 +1,123 @@
-# 分润台 / commission-rs
+# 分润台 · rs-commission
 
-Rust 编写的独立抽佣与返佣业务系统：平台抽佣、两级推广返佣、退款冲正、冻结解冻、提现结算记账与中文管理台。
+Rust 抽佣、推广返佣与结算系统。0.3 使用 **Leptos CSR + Tauri 2**：一套 Rust 页面，浏览器独立发布，桌面和移动应用通过 Tauri 承载。后端仍为 Axum / Tokio / SQLx / PostgreSQL。
 
-> **交付状态：0.1.0 源码候选版，不是已验收的生产支付产品。**
-> 当前制作环境未安装 Rust/Cargo、PostgreSQL 或 Docker，外网下载工具链也不可用，因此没有执行 Rust 编译、数据库迁移、Rust 测试或容器构建。不能把“已实现源码”理解为“已编译、已联调、可直接处理真实资金”。实际检查范围见 [验证记录](docs/VERIFICATION.md)。
+> 开发中的资金业务系统，不是已审计的支付产品。编译、设备交互和安装包是不同验收层次。以 [验证记录](docs/VERIFICATION.md) 与 PR 对应提交的 CI 为准，不得直接用于真实资金。
 
-## 1. 业务范围与默认口径
-
-这是**一个平台、多商家、多推广员、CNY 单币种**的模块化单体，不是多 SaaS 租户系统，也不是商城。
-
-- 商家货款 = 实付金额 − 平台佣金池。
-- 平台佣金池 = `min(计佣基数, 可选封顶, floor(计佣基数 × 费率基点 ÷ 10000) + 固定费用)`。
-- 一级、二级推广佣金**从平台佣金池内分出**；不存在相应推广员时，该部分留在平台。
-- 平台净佣金 = 平台佣金池 − 一级推广佣金 − 二级推广佣金。
-- 费率变更创建新版本，历史订单保存规则与受益人快照；退款使用原分配，不重新匹配现行规则。
-- 退款按订单实付金额进行累计比例分摊，不是 SKU、数量或商品级退款。
-- 商家货款与佣金一起冻结，冻结期从**本系统成功入账的事务时间**起算，不从收货时间或上游支付时间起算。
-
-示例：实付 100 元，计佣基数 100 元，平台费率 10%，佣金池内一级返佣 30%、二级返佣 10%。
-
-| 收益方 | 金额 |
-|---|---:|
-| 商家货款 | 90.00 元 |
-| 平台净佣金 | 6.00 元 |
-| 一级推广员 | 3.00 元 |
-| 二级推广员 | 1.00 元 |
-| 合计 | 100.00 元 |
-
-## 2. 已写入源码的功能
-
-| 模块 | 功能 |
-|---|---|
-| 账户 | 商家、推广员、不可变上级关系、按账户隔离的成员访问 |
-| 规则 | 全局 / 商家覆盖、优先级、基数区间、按比例＋固定额、封顶、生效区间、停用、新版本 |
-| 计佣 | 试算、已支付订单入账、推广关系解析、规则和受益人快照 |
-| 退款 | 部分 / 全额退款、重复业务号拦截、累计分摊、解冻前后冲正、已提现后形成欠款 |
-| 余额 | 冻结、可用、提现占用三个分类；到期任务；负可用余额与后续收入抵扣 |
-| 提现 | 申请占用、独立凭据审核、执行登记、结果核验、未知结果保留占用、失败 / 驳回释放 |
-| 账本 | 双边平衡分录、提交时数据库平衡约束、禁止修改历史分录、余额投影 |
-| 一致性 | 事务内幂等记录、业务唯一键、行锁、审计、Outbox 租约领取与 ACK |
-| 运维 | 存活 / 就绪检查、JSON 日志、优雅停止、数据库迁移、容器与 GitHub Actions 配置 |
-| 界面 | 中文总览、账户、关系、规则、订单退款、分配、余额、结算、流水、审计、对账、令牌 |
-
-这里的账本是**业务分户账**，不是完整企业财务总账；支付清算对手账户也不代表已经核验的银行存款余额。
-
-## 3. 本次未接入、未声称完成的内容
-
-真实微信 / 支付宝 / Stripe / 银行接口、渠道回调验签、自动代付、外部账单导入与对账、开户实名认证、收款账户验证、税务代扣、发票、退款实际打款均未实现。提供的提现流程是“人工外部转账＋核验登记”，不会模拟渠道自动成功。
-
-也不包含：商城、商品级规则和退款、多币种换汇、多租户 SaaS、销售业绩阶梯提成、营销优惠分摊、实人身份权限系统、MFA、自动风控、监控告警平台、高可用部署或经过压测的性能承诺。二级返佣是技术能力，不是针对任何经营模式的合规判断。
-
-## 4. 技术结构
+## 架构
 
 ```text
-中文管理台 / 可信上游业务系统
-              │
-         Axum HTTP API
-              │
-  ┌───────────┼───────────┐
-  规则与关系   订单与退款    提现状态机
-  └───────────┼───────────┘
-        平衡分录 + 余额投影
-              │
-       PostgreSQL 事务
-  幂等记录 / 账本 / 审计 / Outbox
-              │
-      内置到期解冻任务
+                          同一份 Leptos Rust UI
+                          /                 \
+                    浏览器 WASM         Tauri WebView WASM
+                         |                  | 七个限定 IPC 命令
+                 Rust SDK / fetch       Tauri Rust 宿主 + Rust SDK
+                          \                 /
+                           Axum Rust API
+                                |
+                         PostgreSQL 业务账本
 ```
 
-采用 Axum `0.8.9`、SQLx `0.8.6` 与 Tokio。SQLx **有意固定在 0.8.6**，不声称是最新版。查询使用参数绑定的运行时 SQL，不依赖编译时在线数据库检查。数据库 SQL 使用 PostgreSQL 特性，不支持用 SQLite 代替集成测试。
+Web 与 Tauri 共用 `apps/console/src/app.rs`。`platform.rs` 只隔离网络传输；没有为每个平台复制页面。共享金额和协议在 `commission-types`，鉴权、规则选择、退款与最终记账只由服务器决定。多端指操作系统和浏览器，不表示 SaaS 多租户。
 
-前端是原生 HTML / CSS / JavaScript，由 Rust 二进制内嵌提供，不依赖 npm 构建或前端 CDN。核心服务、业务逻辑与任务均使用 Rust，没有引入 Python 服务或验证脚本。
+Tauri 内的 Leptos 同样编译为 WASM，不是本机控件。WebView 负责 DOM/CSS；原生 Rust 宿主负责网络和命令状态。`bootstrap.js` 只加载 WASM，业务与交互逻辑不用手写 JavaScript，也不依赖 Node 运行时。
 
-## 5. 本地启动
+## 目录
 
-### Docker Compose
+| 路径 | 职责 |
+|---|---|
+| `src/` | Axum 后端、鉴权、事务、业务服务、账本 |
+| `crates/commission-types/` | 共用金额、规则、请求/响应、确定性计算 |
+| `crates/commission-client/` | HTTP SDK、幂等请求、可独立测试的原生会话桥 |
+| `apps/console/src/` | Leptos 中文页面与平台传输隔离 |
+| `apps/console/src-tauri/` | Tauri 宿主、命令权限与平台配置 |
+| `migrations/` | PostgreSQL 表、约束与触发器 |
+| `tests/` | 后端数据库集成及浏览器回归 |
 
-需要本机已有 Docker Compose，且能访问镜像与 crates 源。
+## 后端启动
 
 ```bash
 cp .env.example .env
-# 将 .env 的密码替换为随机十六进制值，例如 openssl rand -hex 24 的输出。
-# 不要使用示例占位密码。
+# 把 POSTGRES_PASSWORD 改为随机十六进制密码。
 docker compose up --build -d
-
-# 首次运行：创建一次性展示的管理员令牌。
 docker compose exec app commissiond bootstrap
 ```
 
-浏览器打开 `http://127.0.0.1:8080`，使用输出 JSON 中的 `secret` 登录。**妥善保存令牌**，默认 90 天到期，服务不会将其写入普通启动日志。不要重复执行初始化。先创建独立运营、财务、集成凭据，再开展业务。
+API 为 `http://127.0.0.1:8081`。保存初始化时一次性输出的管理员令牌，不要写入仓库、截图或日志。不使用 Docker 时显式设置 DATABASE_URL，先执行 `commissiond migrate`，再以 `BIND_ADDR=127.0.0.1:8081` 启动服务。程序不自动读取 .env。
 
-Compose 只面向本机联调：数据库和 Web 端口均只绑定回环地址。PostgreSQL 18 数据卷使用 `/var/lib/postgresql`。首次迁移失败时，应用不会绕过迁移启动。不要对需要保留的数据运行 `docker compose down -v`。
-
-### 原生 Rust
-
-需要 Rust 工具链和 PostgreSQL。程序不自动加载 `.env`，请设置环境变量。
+## 浏览器开发
 
 ```bash
-export DATABASE_URL='postgres://commission:YOUR_HEX_PASSWORD@127.0.0.1:5432/commission'
-cargo generate-lockfile
-cargo fmt --all
-cargo build --locked
-cargo run --locked -- migrate
-cargo run --locked -- bootstrap
-cargo run --locked -- serve
+rustup target add wasm32-unknown-unknown
+cargo install trunk --version 0.21.14 --locked
+cd apps/console
+trunk serve
 ```
 
-默认监听 `127.0.0.1:8080`。`BIND_ADDR` 可调整监听地址；`RELEASE_WORKER=false` 可关闭自动解冻以便测试。多实例都启用任务时通过 `FOR UPDATE SKIP LOCKED` 分摊到期订单。
+访问 `http://localhost:1420`。Trunk 把同源 `/api/` 代理到后端。正式静态资源：`trunk build --release --locked`，输出 `apps/console/dist`。Web 端禁止将令牌发送到任意输入的第三方服务地址。
 
-> 本次没有伪造 `Cargo.lock`。首次联网解析依赖后，应审查并提交生成的锁文件，再将 Docker 构建改为 `cargo build --locked`；正式镜像和 CI action 也应固定经过核验的 digest / commit。当前 Dockerfile 使用浮动 Rust 镜像，尚不构成可复现发布。
-
-## 6. 推荐演示顺序
-
-创建商家 → 创建上级推广员 → 创建直接推广员并设置上级 → 绑定客户 → 创建全局规则（联调可用 0 天冻结）→ 录入已支付订单 → 查看分配和余额 → 到期解冻 → 申请提现 → 换财务令牌审核和执行登记 → 核验外部结果 → 登记退款 → 查看欠款和内部对账。
-
-首笔提现不要用同一个凭据申请和审核。所谓双人控制在当前版本中是**凭据级分离**，不是已验证的自然人身份分离；管理员能签发多个令牌，组织仍需控制实际持有人及密钥权限。
-
-## 7. 测试
+完整 Web 容器配置：
 
 ```bash
-# 纯算术与类型测试，无须数据库
-cargo test --locked --lib
+docker compose --profile web up --build -d
+# 前端 http://127.0.0.1:8080
+```
 
-# PostgreSQL 集成测试；测试账号须能创建测试数据库
-export DATABASE_URL='postgres://postgres:YOUR_PASSWORD@127.0.0.1:5432/commission_test'
-cargo test --locked --test http_postgres
+Docker 双镜像构建启动是否实跑见验证记录。生产必须提供可信 HTTPS、独立数据库权限及备份，不要直接暴露开发端口。
 
-cargo clippy --locked --all-targets -- -D warnings
+## 桌面与移动开发
+
+安装原生工具链及对应系统 WebView 依赖后：
+
+```bash
+cargo install tauri-cli --version 2.11.4 --locked
+cd apps/console
+cargo tauri dev
+# 构建可执行程序（当前关闭安装包 bundler）
+cargo tauri build --no-bundle
+```
+
+Tauri 自动构建同一套 Leptos 页面，启用 `tauri` transport feature，输出 `dist-tauri`。这不是把远程网页加载到窗口中。原生端服务地址默认 loopback:8081，可在登录时填写受信 HTTPS 源。
+
+移动平台仍需各自环境与首次生成工程，以下为配置使用入口，不代表已经编译或真机验收：
+
+```bash
+# Android SDK / NDK / 设备
+cargo tauri android init
+cargo tauri android dev
+# macOS / Xcode / iOS Simulator
+cargo tauri ios init
+cargo tauri ios dev
+```
+
+手机的 localhost 是手机自身。移动开发还需配置设备可访问的前端开发地址和 HTTPS API；不要全局放宽证书校验。详见 [跨平台说明](docs/CROSS_PLATFORM.md)。
+
+## 业务范围与安全边界
+
+单平台、多商家、多推广员、CNY。保留计佣规则与快照、累计部分退款、冻结/解冻、提现状态机、平衡分录、审计、内部对账和 Outbox。返佣从平台佣金池内划分，不向商家重复扣费。
+
+中文 UI 包含 13 类数据视图、分页、服务器试算，以及 14 种共享类型校验的业务写操作。高级操作仍是 JSON 编辑加明确确认，不是完整专用业务表单。金额采用整数分和 JSON 字符串，不使用浮点。
+
+原生令牌与不可变写请求保存在 Rust 进程，UI 收到会话和请求句柄；令牌录入仍经过 WebView，不能据此宣称防御已被入侵的前端或本机。权限仅开放本地 main 窗口的七个业务命令，没有通用 HTTP 代理、Shell、文件系统权限。
+
+未知结果不能丢弃或切换账号，只能原 key/body 重试。原生已完成操作缓存结果，避免 IPC 响应丢失后再次发 HTTP 请求。当前仍无跨进程重启恢复，勿在未知结果时强制关闭或刷新；这不是持久资金队列。
+
+**不会自动代付。** 结算仍是人工转账后的核验登记，尚未接真实渠道、验签、外部账单、实人认证、税务或风控。
+
+## 验证命令
+
+```bash
+cargo test --locked -p commission-types -p commission-client
+# 必须有可用 DATABASE_URL 才能执行数据库集成测试
+cargo test --locked -p commission-rs --all-targets
+cargo clippy --locked -p commission-rs -p commission-types -p commission-client --all-targets -- -D warnings
+cargo check --locked -p commission-console --target wasm32-unknown-unknown
+cargo check --locked -p commission-console --target wasm32-unknown-unknown --features tauri
+# 先构建 apps/console/dist-tauri
+cargo build --locked -p commission-shell --features custom-protocol
 cargo fmt --all -- --check
-
-# 可选：Node.js 内置测试运行器，无 npm 依赖
-node --test tests/frontend.test.cjs
 ```
 
-集成测试由 SQLx 为每个测试分配隔离数据库；**不要把生产数据库或生产凭据作为测试连接**。CI 配置包含 PostgreSQL 服务，但本次没有触发或看到远程 CI 运行。
+不要将整个 workspace 按 wasm target 或 all-features 混编，原生宿主和后端不是浏览器依赖。CI 分目标验证。
 
-## 8. 文档
-
-- [业务与一致性设计](docs/ARCHITECTURE.md)
-- [接口与角色说明](docs/API.md)
-- [部署与资金操作手册](docs/OPERATIONS.md)
-- [实际验证记录和发布门禁](docs/VERIFICATION.md)
-
-项目许可证为 MIT；依赖许可证需随最终锁定依赖另行审查。
+[API](docs/API.md) · [账务架构](docs/ARCHITECTURE.md) · [多端](docs/CROSS_PLATFORM.md) · [运维](docs/OPERATIONS.md) · [验证](docs/VERIFICATION.md) · [迁移说明](docs/LEPTOS_TAURI_MIGRATION.md)

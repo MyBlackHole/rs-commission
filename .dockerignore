@@ -2,3 +2,7 @@ target
 .git
 .env
 *.zip
+*.tar.gz
+**/dist
+**/dist-tauri
+**/src-tauri/gen

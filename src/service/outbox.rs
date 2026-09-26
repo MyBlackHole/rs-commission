@@ -1,4 +1,7 @@
-use crate::{error::{Error, Result}, model::{AckEvent, Actor, ClaimEvents, Page}};
+use crate::{
+    error::{Error, Result},
+    model::{AckEvent, Actor, ClaimEvents, Page},
+};
 use serde_json::{json, Value};
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -6,8 +9,13 @@ use uuid::Uuid;
 pub async fn list(pool: &PgPool, actor: &Actor, input: Page) -> Result<Value> {
     actor.require(&["integrator", "auditor"])?;
     let (limit, offset) = input.bounds()?;
-    let mut rows: Vec<Value> = sqlx::query_scalar("SELECT to_jsonb(o) FROM outbox o ORDER BY created_at DESC,id DESC LIMIT $1 OFFSET $2")
-        .bind(limit+1).bind(offset).fetch_all(pool).await?;
+    let mut rows: Vec<Value> = sqlx::query_scalar(
+        "SELECT to_jsonb(o) FROM outbox o ORDER BY created_at DESC,id DESC LIMIT $1 OFFSET $2",
+    )
+    .bind(limit + 1)
+    .bind(offset)
+    .fetch_all(pool)
+    .await?;
     let has_more = rows.len() > limit as usize;
     rows.truncate(limit as usize);
     Ok(json!({"items":rows,"limit":limit,"offset":offset,"has_more":has_more}))
@@ -34,7 +42,9 @@ pub async fn ack(pool: &PgPool, actor: &Actor, id: Uuid, input: AckEvent) -> Res
     actor.require(&["integrator"])?;
     let rows = sqlx::query("UPDATE outbox SET delivered_at=COALESCE(delivered_at,now()) WHERE id=$1 AND lease_token=$2 AND (delivered_at IS NOT NULL OR lease_until>now())")
         .bind(id).bind(input.lease_token).execute(pool).await?.rows_affected();
-    if rows == 0 { return Err(Error::conflict("事件不存在、租约过期或已被其他消费者领取")); }
+    if rows == 0 {
+        return Err(Error::conflict("事件不存在、租约过期或已被其他消费者领取"));
+    }
     // Do not produce an outbox event for an outbox ACK (would recurse indefinitely).
     Ok(json!({"id":id,"acknowledged":true}))
 }

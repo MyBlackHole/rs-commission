@@ -1,0 +1,24 @@
+[package]
+name = "commission-client"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+commission-types = { path = "../commission-types" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+url = "2"
+uuid = { version = "1", features = ["v4", "js"] }
+reqwest = { version = "=0.13.5", default-features = false, features = ["json"] }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+reqwest = { version = "=0.13.5", default-features = false, features = ["json", "rustls"] }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+futures-util = "0.3"
+gloo-timers = { version = "0.3", features = ["futures"] }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "io-util"] }

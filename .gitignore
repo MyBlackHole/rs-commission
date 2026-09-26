@@ -2,3 +2,6 @@
 .env
 *.log
 .DS_Store
+/apps/console/dist/
+/apps/console/dist-tauri/
+/apps/console/src-tauri/gen/

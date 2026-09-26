@@ -1,9 +1,16 @@
-name: Rust and PostgreSQL
-on: [push, pull_request, workflow_dispatch]
+name: Rust workspace
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
 permissions:
   contents: read
+concurrency:
+  group: rust-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
-  test:
+  server:
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -12,24 +19,99 @@ jobs:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
           POSTGRES_DB: commission_test
-        ports: ["5432:5432"]
+        ports: ['5432:5432']
         options: >-
           --health-cmd "pg_isready -U postgres"
           --health-interval 5s --health-timeout 5s --health-retries 12
     env:
       DATABASE_URL: postgres://postgres:postgres@localhost:5432/commission_test
-      RUST_BACKTRACE: "1"
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - run: cargo generate-lockfile
-      - run: cargo test --locked --all-targets
-      - run: cargo clippy --locked --all-targets -- -D warnings
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --locked -p commission-rs -p commission-types -p commission-client --all-targets
+      - run: cargo clippy --locked -p commission-rs -p commission-types -p commission-client --all-targets -- -D warnings
+  web:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: leptos-wasm
+      - run: cargo check --locked -p commission-console --target wasm32-unknown-unknown
+      - run: cargo clippy --locked -p commission-console --target wasm32-unknown-unknown --all-features -- -D warnings
+      - name: Browser dependency boundary
+        run: |
+          cargo tree --locked -p commission-console --target wasm32-unknown-unknown -e normal > /tmp/web-deps.txt
+          if grep -E ' (sqlx|axum|commission-rs|tauri) v' /tmp/web-deps.txt; then exit 1; fi
+      - name: Install pinned Trunk release
+        run: |
+          curl -fL --retry 3 https://github.com/trunk-rs/trunk/releases/download/v0.21.14/trunk-x86_64-unknown-linux-gnu.tar.gz -o /tmp/trunk.tar.gz
+          curl -fL --retry 3 https://github.com/trunk-rs/trunk/releases/download/v0.21.14/trunk-x86_64-unknown-linux-gnu.tar.gz.sha256 -o /tmp/trunk.sha256
+          echo "$(cat /tmp/trunk.sha256)  /tmp/trunk.tar.gz" | sha256sum --check
+          mkdir /tmp/trunk-bin && tar -xzf /tmp/trunk.tar.gz -C /tmp/trunk-bin
+          install "$(find /tmp/trunk-bin -type f -name trunk -print -quit)" "$HOME/.cargo/bin/trunk"
+      - name: Build same Leptos UI for browser and native bridge
+        working-directory: apps/console
+        run: |
+          trunk build --release --locked
+          trunk build --release --locked --features tauri --dist dist-tauri
+      - run: git diff --exit-code -- Cargo.lock
+      - uses: actions/upload-artifact@v4
+        with:
+          name: commission-console-web
+          path: apps/console/dist
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: commission-console-tauri-assets
+          path: apps/console/dist-tauri
+          if-no-files-found: error
+      - name: Prepare browser testing
+        run: |
+          python3 -m pip install playwright==1.57.0
+          command -v google-chrome || python3 -m playwright install --with-deps chromium
+          sudo apt-get update && sudo apt-get install -y fonts-noto-cjk
+      - name: Browser regression with fixture APIs
+        run: python3 tests/console_browser.py
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: resolved-cargo-lock
-          path: Cargo.lock
+          name: browser-qa
+          path: target/browser-qa
+  desktop:
+    needs: web
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: tauri-desktop
+      - uses: actions/download-artifact@v4
+        with:
+          name: commission-console-tauri-assets
+          path: apps/console/dist-tauri
+      - name: Linux WebView dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev patchelf
+      - run: cargo test --locked -p commission-types -p commission-client
+      - name: Compile and link Tauri with bundled Leptos assets
+        run: cargo build --locked -p commission-shell --features custom-protocol
+      - name: Native backend portability
+        run: cargo check --locked -p commission-rs --bin commissiond
   format:
     runs-on: ubuntu-latest
     steps:
@@ -38,3 +120,12 @@ jobs:
         with:
           components: rustfmt
       - run: cargo fmt --all -- --check
+  source:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: git archive --format=tar.gz -o "$RUNNER_TEMP/rs-commission-source.tar.gz" HEAD
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rs-commission-source
+          path: ${{ runner.temp }}/rs-commission-source.tar.gz

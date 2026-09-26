@@ -1,4 +1,7 @@
-use crate::{error::{Error, Result}, model::*};
+use crate::{
+    error::{Error, Result},
+    model::*,
+};
 use serde::Serialize;
 use serde_json::{json, Value};
 use sqlx::PgPool;
@@ -11,8 +14,14 @@ fn page<T: Serialize>(mut items: Vec<T>, limit: i64, offset: i64) -> Result<Valu
 }
 
 fn scope(actor: &Actor, requested: Option<Uuid>) -> Result<Option<Uuid>> {
-    if let Some(id) = requested { actor.check_account(id)?; }
-    Ok(if actor.role == "member" { actor.account_id } else { requested })
+    if let Some(id) = requested {
+        actor.check_account(id)?;
+    }
+    Ok(if actor.role == "member" {
+        actor.account_id
+    } else {
+        requested
+    })
 }
 
 pub async fn accounts(pool: &PgPool, actor: &Actor, input: Page) -> Result<Value> {
@@ -39,15 +48,22 @@ pub async fn wallets(pool: &PgPool, actor: &Actor, input: Page) -> Result<Value>
 pub async fn wallet(pool: &PgPool, actor: &Actor, id: Uuid) -> Result<Value> {
     actor.check_account(id)?;
     let row = sqlx::query_as::<_, Wallet>("SELECT * FROM wallets WHERE account_id=$1")
-        .bind(id).fetch_optional(pool).await?.ok_or(Error::NotFound)?;
+        .bind(id)
+        .fetch_optional(pool)
+        .await?
+        .ok_or(Error::NotFound)?;
     Ok(serde_json::to_value(row)?)
 }
 
 pub async fn rules(pool: &PgPool, actor: &Actor, input: Page) -> Result<Value> {
     actor.require(&["operator", "integrator", "finance", "auditor"])?;
     let (limit, offset) = input.bounds()?;
-    let rows = sqlx::query_as::<_, Rule>("SELECT * FROM rules ORDER BY version DESC LIMIT $1 OFFSET $2")
-        .bind(limit+1).bind(offset).fetch_all(pool).await?;
+    let rows =
+        sqlx::query_as::<_, Rule>("SELECT * FROM rules ORDER BY version DESC LIMIT $1 OFFSET $2")
+            .bind(limit + 1)
+            .bind(offset)
+            .fetch_all(pool)
+            .await?;
     page(rows, limit, offset)
 }
 
@@ -70,11 +86,20 @@ pub async fn orders(pool: &PgPool, actor: &Actor, input: Page) -> Result<Value> 
 pub async fn order(pool: &PgPool, actor: &Actor, id: Uuid) -> Result<Value> {
     actor.require(&["operator", "integrator", "finance", "auditor"])?;
     let mut tx = pool.begin().await?;
-    sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY").execute(&mut *tx).await?;
+    sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
+        .execute(&mut *tx)
+        .await?;
     let order = sqlx::query_as::<_, Order>("SELECT * FROM orders WHERE id=$1")
-        .bind(id).fetch_optional(&mut *tx).await?.ok_or(Error::NotFound)?;
-    let allocations = sqlx::query_as::<_, Allocation>("SELECT * FROM allocations WHERE order_id=$1 ORDER BY ordinal")
-        .bind(id).fetch_all(&mut *tx).await?;
+        .bind(id)
+        .fetch_optional(&mut *tx)
+        .await?
+        .ok_or(Error::NotFound)?;
+    let allocations = sqlx::query_as::<_, Allocation>(
+        "SELECT * FROM allocations WHERE order_id=$1 ORDER BY ordinal",
+    )
+    .bind(id)
+    .fetch_all(&mut *tx)
+    .await?;
     let refunds: Vec<Value> = sqlx::query_scalar(
         "SELECT jsonb_build_object('id',id,'external_id',external_id,'amount_minor',amount_minor::TEXT,'cumulative_minor',cumulative_minor::TEXT,'reason',reason,'allocation_deltas',allocation_deltas,'created_at',created_at)
          FROM refunds WHERE order_id=$1 ORDER BY created_at,id")
@@ -119,8 +144,13 @@ pub async fn payouts(pool: &PgPool, actor: &Actor, input: Page) -> Result<Value>
 pub async fn audit(pool: &PgPool, actor: &Actor, input: Page) -> Result<Value> {
     actor.require(&["operator", "finance", "auditor"])?;
     let (limit, offset) = input.bounds()?;
-    let rows: Vec<Value> = sqlx::query_scalar("SELECT to_jsonb(a) FROM audit_events a ORDER BY id DESC LIMIT $1 OFFSET $2")
-        .bind(limit+1).bind(offset).fetch_all(pool).await?;
+    let rows: Vec<Value> = sqlx::query_scalar(
+        "SELECT to_jsonb(a) FROM audit_events a ORDER BY id DESC LIMIT $1 OFFSET $2",
+    )
+    .bind(limit + 1)
+    .bind(offset)
+    .fetch_all(pool)
+    .await?;
     page(rows, limit, offset)
 }
 
@@ -163,8 +193,12 @@ pub async fn dashboard(pool: &PgPool, actor: &Actor) -> Result<Value> {
 pub async fn reconcile(pool: &PgPool, actor: &Actor) -> Result<Value> {
     actor.require(&["finance", "auditor"])?;
     let mut tx = pool.begin().await?;
-    sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY").execute(&mut *tx).await?;
-    sqlx::query("SET LOCAL statement_timeout='30s'").execute(&mut *tx).await?;
+    sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query("SET LOCAL statement_timeout='30s'")
+        .execute(&mut *tx)
+        .await?;
     let unbalanced: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM (SELECT j.id FROM journals j LEFT JOIN ledger_entries e ON e.journal_id=j.id
          GROUP BY j.id HAVING COALESCE(sum(e.delta_minor::NUMERIC),0)<>0 OR count(e.journal_id)<2) x")
@@ -196,8 +230,10 @@ pub async fn reconcile(pool: &PgPool, actor: &Actor) -> Result<Value> {
          WHERE w.reserved_minor<>COALESCE(p.expected,0)")
         .fetch_one(&mut *tx).await?;
     tx.commit().await?;
-    Ok(json!({"ok":unbalanced==0 && wallet_differences.is_empty() && allocation_differences==0 && refund_differences==0 && reserved_differences==0,
+    Ok(
+        json!({"ok":unbalanced==0 && wallet_differences.is_empty() && allocation_differences==0 && refund_differences==0 && reserved_differences==0,
         "scope":"internal_only","unbalanced_journals":unbalanced,"wallet_differences":wallet_differences,
         "wallet_difference_sample_limit":100,"allocation_differences":allocation_differences,"refund_differences":refund_differences,
-        "reserved_differences":reserved_differences,"external_payment_reconciled":false}))
+        "reserved_differences":reserved_differences,"external_payment_reconciled":false}),
+    )
 }

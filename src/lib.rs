@@ -9,6 +9,8 @@ pub mod service;
 pub mod transaction;
 
 #[derive(Clone)]
-pub struct AppState { pub pool: sqlx::PgPool }
+pub struct AppState {
+    pub pool: sqlx::PgPool,
+}
 
 pub static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");

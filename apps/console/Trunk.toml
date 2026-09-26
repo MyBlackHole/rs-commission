@@ -1,0 +1,16 @@
+trunk-version = "=0.21.14"
+[build]
+target = "index.html"
+dist = "dist"
+filehash = false
+locked = true
+# External loader keeps the deployment CSP free of script unsafe-inline.
+pattern_script = '<script type="module" src="{base}bootstrap.js"></script>'
+[watch]
+ignore = ["src-tauri", "dist", "dist-tauri"]
+[serve]
+port = 1420
+open = false
+ws_protocol = "ws"
+[[proxy]]
+backend = "http://127.0.0.1:8081/api/"
