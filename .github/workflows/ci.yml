@@ -172,6 +172,38 @@ jobs:
           name: real-stack-e2e
           path: target/real-e2e
           if-no-files-found: error
+  tauri-lifecycle:
+    needs: web
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: tauri-lifecycle
+      - uses: actions/download-artifact@v4
+        with:
+          name: commission-console-tauri-assets
+          path: apps/console/dist-tauri
+      - name: Install Tauri WebDriver dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev patchelf webkit2gtk-driver xvfb
+          command -v WebKitWebDriver
+      - name: Build real Tauri desktop binary
+        run: cargo build --locked -p commission-shell --features custom-protocol
+      - name: Install pinned Tauri WebDriver bridge
+        run: cargo install tauri-driver --locked --version 2.0.6
+      - name: Hard-kill and restart recovery E2E
+        run: xvfb-run -a python3 tests/tauri_lifecycle_e2e.py target/debug/commission-shell
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: tauri-lifecycle-e2e
+          path: target/tauri-lifecycle-e2e
+          if-no-files-found: error
+
   desktop:
     needs: web
     strategy:
