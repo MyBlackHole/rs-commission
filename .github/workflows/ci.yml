@@ -86,6 +86,92 @@ jobs:
         with:
           name: browser-qa
           path: target/browser-qa
+  e2e:
+    needs: web
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: commission_e2e
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres -d commission_e2e"
+          --health-interval 5s --health-timeout 5s --health-retries 12
+    env:
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/commission_e2e
+      E2E_BASE_URL: http://127.0.0.1:8090
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: real-e2e
+      - uses: actions/download-artifact@v4
+        with:
+          name: commission-console-web
+          path: /tmp/rs-commission-web
+      - name: Build and initialize real API
+        run: |
+          cargo build --locked -p commission-rs --bin commissiond
+          target/debug/commissiond migrate
+          python3 - <<'PY'
+          import json
+          import os
+          import subprocess
+
+          data = json.loads(subprocess.check_output(
+              ["target/debug/commissiond", "bootstrap"], text=True
+          ))
+          token = data["secret"]
+          print(f"::add-mask::{token}")
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as env:
+              env.write(f"ADMIN_TOKEN={token}\n")
+          PY
+          nohup env BIND_ADDR=127.0.0.1:8081 RELEASE_WORKER=false \
+            target/debug/commissiond serve >/tmp/commission-e2e-api.log 2>&1 &
+          echo $! >/tmp/commission-e2e-api.pid
+          for _ in $(seq 1 60); do
+            if curl --silent --fail http://127.0.0.1:8081/health/ready >/dev/null; then
+              break
+            fi
+            sleep 1
+          done
+          curl --fail http://127.0.0.1:8081/health/ready
+      - name: Prepare real browser gateway
+        run: |
+          python3 -m pip install playwright==1.57.0
+          command -v google-chrome || python3 -m playwright install --with-deps chromium
+          sudo apt-get update
+          sudo apt-get install -y nginx fonts-noto-cjk
+          sudo nginx -t -c "$GITHUB_WORKSPACE/tests/e2e.nginx.conf"
+          sudo nginx -c "$GITHUB_WORKSPACE/tests/e2e.nginx.conf"
+          for _ in $(seq 1 30); do
+            if curl --silent --fail "$E2E_BASE_URL/health/ready" >/dev/null; then
+              break
+            fi
+            sleep 1
+          done
+          curl --fail "$E2E_BASE_URL/health/ready"
+          curl --fail "$E2E_BASE_URL/" >/dev/null
+      - name: Real browser to Axum to PostgreSQL E2E
+        run: python3 tests/real_stack_e2e.py
+      - name: Collect real E2E logs
+        if: always()
+        run: |
+          mkdir -p target/real-e2e
+          cp /tmp/commission-e2e-api.log target/real-e2e/api.log 2>/dev/null || true
+          cp /tmp/commission-e2e-nginx-error.log target/real-e2e/nginx-error.log 2>/dev/null || true
+          cp /tmp/commission-e2e-nginx-access.log target/real-e2e/nginx-access.log 2>/dev/null || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: real-stack-e2e
+          path: target/real-e2e
+          if-no-files-found: error
   desktop:
     needs: web
     strategy:
