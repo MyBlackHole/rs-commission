@@ -162,13 +162,21 @@ fn PayoutDetail(
         ("提现号", display("external_id", &value["external_id"])),
         ("金额", display("amount_minor", &value["amount_minor"])),
         ("状态", status_label(&value["status"]).to_owned()),
-        ("收款目标", display("destination_ref", &value["destination_ref"])),
-        ("外部流水", display("provider_reference", &value["provider_reference"])),
+        (
+            "收款目标",
+            display("destination_ref", &value["destination_ref"]),
+        ),
+        (
+            "外部流水",
+            display("provider_reference", &value["provider_reference"]),
+        ),
         ("更新时间", display("updated_at", &value["updated_at"])),
     ]
     .into_iter()
-    .map(|(name, content)| view! {
-        <article class="metric"><span>{name}</span><strong>{content}</strong></article>
+    .map(|(name, content)| {
+        view! {
+            <article class="metric"><span>{name}</span><strong>{content}</strong></article>
+        }
     })
     .collect_view();
     let can_manage = Operation::ApprovePayout.allowed(&actor);
@@ -228,7 +236,10 @@ fn PayoutAction(
     let confirmed = RwSignal::new(false);
     let pending = RwSignal::new_local(None::<Write>);
     let message = RwSignal::new(String::new());
-    let needs_reason = matches!(operation, Operation::ProcessPayout | Operation::RejectPayout);
+    let needs_reason = matches!(
+        operation,
+        Operation::ProcessPayout | Operation::RejectPayout
+    );
     let needs_outcome = operation == Operation::PayoutOutcome;
 
     view! {
