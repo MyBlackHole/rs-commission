@@ -73,7 +73,7 @@ try:
         expect(page.get_by_role("button", name="查看详情", exact=True)).to_be_visible()
         page.get_by_role("button", name="查看详情", exact=True).click()
         expect(page.get_by_role("heading", name="订单详情", exact=True)).to_be_visible()
-        expect(page.get_by_text("¥ 100.00", exact=True)).to_be_visible()
+        expect(page.locator("article.metric").filter(has_text="实付金额").locator("strong")).to_have_text("¥ 100.00")
         page.locator("nav").get_by_role("button", name="佣金试算", exact=True).click()
         panel = page.locator("section.panel").first
         panel.locator("input").nth(0).fill("11111111-1111-4111-8111-111111111111")
