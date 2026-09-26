@@ -15,7 +15,12 @@ pub struct WriteReceipt {
     pub key: String,
     pub path: String,
 }
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Serialize, Deserialize)]
+pub struct RecoveredWriteReceipt {
+    pub receipt: WriteReceipt,
+    pub phase: WritePhase,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum WritePhase {
     Editing,
     Preparing,

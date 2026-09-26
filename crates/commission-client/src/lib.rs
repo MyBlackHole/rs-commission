@@ -1,5 +1,5 @@
-//! Shared HTTP SDK. Tokens and prepared writes are memory-only. No automatic
-//! financial retries: callers must retain and explicitly resend PreparedWrite.
+//! Shared HTTP SDK. Tokens remain memory-only. Prepared writes can be exported as
+//! explicit durable retry material, but are never retried automatically.
 pub mod bridge;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod native;
@@ -54,10 +54,24 @@ pub struct ApiClient {
     session_id: Uuid,
 }
 
-/// Deliberately not Debug/Serialize: request bodies can contain sensitive data.
+/// Durable retry material. It intentionally excludes bearer credentials and the
+/// ephemeral SDK session id, but the body can still contain business-sensitive
+/// fields and must be stored as protected application data.
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
+pub struct PersistedWrite {
+    pub operation: Operation,
+    pub target: Option<Uuid>,
+    pub key: String,
+    pub body: String,
+}
+
+/// Deliberately not Debug/Serialize: live writes are scoped to one authenticated
+/// SDK session. Persistence must go through PersistedWrite and explicit restore.
 #[derive(Clone)]
 pub struct PreparedWrite {
     session_id: Uuid,
+    operation: Operation,
+    target: Option<Uuid>,
     path: String,
     key: String,
     body: String,
@@ -68,6 +82,14 @@ impl PreparedWrite {
     }
     pub fn path(&self) -> &str {
         &self.path
+    }
+    pub fn persisted(&self) -> PersistedWrite {
+        PersistedWrite {
+            operation: self.operation,
+            target: self.target,
+            key: self.key.clone(),
+            body: self.body.clone(),
+        }
     }
 }
 
@@ -315,8 +337,27 @@ impl ApiClient {
         let (path, body) = operation.encode(id, json)?;
         Ok(PreparedWrite {
             session_id: self.session_id,
+            operation,
+            target: id,
             path,
             key: Uuid::new_v4().to_string(),
+            body,
+        })
+    }
+    pub fn restore(&self, persisted: &PersistedWrite) -> Result<PreparedWrite> {
+        if persisted.body.len() > 60 * 1024 {
+            return Err(invalid("持久化请求体过大"));
+        }
+        Uuid::parse_str(&persisted.key).map_err(|_| invalid("持久化幂等键无效"))?;
+        let (path, body) = persisted
+            .operation
+            .encode(persisted.target, &persisted.body)?;
+        Ok(PreparedWrite {
+            session_id: self.session_id,
+            operation: persisted.operation,
+            target: persisted.target,
+            path,
+            key: persisted.key.clone(),
             body,
         })
     }
@@ -444,6 +485,11 @@ mod tests {
         assert_eq!(write.key(), retry.key());
         assert_eq!(write.body, retry.body);
         assert_eq!(a.session_id, write.session_id);
+        let persisted = write.persisted();
+        let restored = a.restore(&persisted).unwrap();
+        assert_eq!(restored.key(), write.key());
+        assert_eq!(restored.body, write.body);
+        assert_eq!(restored.path(), write.path());
         assert_ne!(
             a.session_id,
             ApiClient::new("https://example.com", "other")

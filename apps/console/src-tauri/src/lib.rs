@@ -1,12 +1,12 @@
 //! Thin OS host. No commission calculation, SQL access or arbitrary HTTP proxy.
 use commission_client::{
-    bridge::{NativeSessionInfo, WriteReceipt},
+    bridge::{NativeSessionInfo, RecoveredWriteReceipt, WriteReceipt},
     native::NativeBridge,
     Operation, Result,
 };
 use commission_types::QuoteInput;
 use serde_json::Value;
-use tauri::State;
+use tauri::{Manager, State};
 use uuid::Uuid;
 
 #[tauri::command]
@@ -20,6 +20,13 @@ async fn session_login(
 #[tauri::command]
 fn session_logout(state: State<'_, NativeBridge>, session: Uuid) -> Result<()> {
     state.logout(session)
+}
+#[tauri::command]
+fn recover_write(
+    state: State<'_, NativeBridge>,
+    session: Uuid,
+) -> Result<Option<RecoveredWriteReceipt>> {
+    state.recover(session)
 }
 #[tauri::command]
 async fn read_resource(
@@ -72,13 +79,19 @@ async fn execute_write(
 fn discard_write(state: State<'_, NativeBridge>, session: Uuid, request: Uuid) -> Result<()> {
     state.discard(session, request)
 }
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .manage(NativeBridge::default())
+        .setup(|app| {
+            let path = app.path().app_data_dir()?.join("pending-write-v1.json");
+            app.manage(NativeBridge::persistent(path)?);
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             session_login,
             session_logout,
+            recover_write,
             read_resource,
             quote_commission,
             order_detail,

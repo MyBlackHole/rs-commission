@@ -1,7 +1,7 @@
 //! Shared Leptos CSR UI: identical components for browser and Tauri WebViews.
 use crate::{
     display::{display, label},
-    platform::{self, Client, Write},
+    platform::{self, Client, Recovery, Write},
 };
 use commission_client::{bridge::WritePhase, Operation, RESOURCES};
 use commission_types::{Actor, Money, QuoteInput};
@@ -17,6 +17,7 @@ struct Session {
 }
 type Auth = RwSignal<Option<Session>, LocalStorage>;
 pub(crate) type ClientStore = StoredValue<Client, LocalStorage>;
+type RecoveryStore = RwSignal<Option<Recovery>, LocalStorage>;
 
 #[component]
 pub fn App() -> impl IntoView {
@@ -75,6 +76,24 @@ fn Shell(session: Session, auth: Auth) -> impl IntoView {
     let phase = RwSignal::new(WritePhase::Editing);
     let error = RwSignal::new(String::new());
     let logging_out = RwSignal::new(false);
+    let recovery: RecoveryStore = RwSignal::new_local(None);
+    phase.set(WritePhase::Preparing);
+    {
+        let client = client.get_value();
+        spawn_local(async move {
+            match client.recover().await {
+                Ok(Some(found)) => {
+                    phase.set(found.phase);
+                    recovery.set(Some(found));
+                }
+                Ok(None) => phase.set(WritePhase::Editing),
+                Err(e) => {
+                    phase.set(WritePhase::Editing);
+                    error.set(format!("无法安全恢复本地待处理请求：{e}"));
+                }
+            }
+        });
+    }
     let is_member = session.actor.role == "member";
     let can_refund = Operation::Refund.allowed(&session.actor);
     let can_manage_payout = Operation::ApprovePayout.allowed(&session.actor);
@@ -109,7 +128,10 @@ fn Shell(session: Session, auth: Auth) -> impl IntoView {
                     }>"退出并清除会话"</button>
             </header>
             <p class="error" role="alert">{move || error.get()}</p>
-            <p class="notice">"外部人工转账模式：登记执行不会自动付款。结果未知时不能退出或另建请求；请保留幂等键核验，勿关闭程序。"</p>
+            <p class="notice">"外部人工转账模式：登记执行不会自动付款。结果未知时不能另建请求；刷新或重启后重新登录，系统会恢复原幂等键请求。"</p>
+            {move || recovery.get().is_some().then(|| view! {
+                <RecoveryPanel client phase recovery/>
+            })}
             {move || match view.get().as_str() {
                 "quote" => view! { <QuotePanel client/> }.into_any(),
                 "orders" => view! {
@@ -130,6 +152,87 @@ fn Shell(session: Session, auth: Auth) -> impl IntoView {
             }}
             <Operations client actor=session.actor phase/>
         </main></div>
+    }
+}
+
+#[component]
+fn RecoveryPanel(
+    client: ClientStore,
+    phase: RwSignal<WritePhase>,
+    recovery: RecoveryStore,
+) -> impl IntoView {
+    let confirmed = RwSignal::new(false);
+    let message = RwSignal::new(String::new());
+    view! {
+        <section class="panel recovery-panel">
+            <div class="section-head"><div>
+                <h2>"恢复未完成写请求"</h2>
+                <p class="muted">{move || match phase.get() {
+                    WritePhase::Prepared => "该请求已持久化但尚未进入发送边界，可核对后提交或放弃。",
+                    WritePhase::Unknown => "该请求曾进入发送边界，结果未知；只能使用原幂等键重试。",
+                    WritePhase::Succeeded => "服务器已确认请求成功；可清除本地恢复记录。",
+                    WritePhase::Rejected => "服务器已明确拒绝请求；可清除本地恢复记录。",
+                    _ => "正在恢复请求状态。",
+                }}</p>
+            </div></div>
+            <pre class="request-info">{move || recovery.get().map(|r| format!(
+                "POST /api/v1/{}\nIdempotency-Key: {}",
+                r.write.path(),
+                r.write.key()
+            )).unwrap_or_default()}</pre>
+            <p class="notice">"恢复数据不包含访问令牌。请先通过当前登录身份重新认证，再继续原请求。"</p>
+            <label class="confirm">
+                <input type="checkbox" prop:checked=move || confirmed.get()
+                    disabled=move || !phase.get().may_send()
+                    on:change=move |e| confirmed.set(event_target_checked(&e))/>
+                "我已核验这是原业务请求，并确认继续使用同一幂等键。"
+            </label>
+            <div class="actions">
+                <button hidden=move || !phase.get().may_send()
+                    disabled=move || !confirmed.get() || !phase.get().may_send()
+                    on:click=move |_| {
+                        if !confirmed.get_untracked() || !phase.get_untracked().may_send() { return; }
+                        let Some(found) = recovery.get_untracked() else { return; };
+                        let client = client.get_value();
+                        phase.set(WritePhase::Sending);
+                        spawn_local(async move {
+                            match client.execute(&found.write).await {
+                                Ok(value) => {
+                                    message.set(serde_json::to_string_pretty(&value).unwrap_or_default());
+                                    phase.set(WritePhase::Succeeded);
+                                }
+                                Err(e) => {
+                                    phase.set(if e.outcome_unknown() { WritePhase::Unknown } else { WritePhase::Rejected });
+                                    message.set(e.to_string());
+                                }
+                            }
+                        });
+                    }>{move || if phase.get() == WritePhase::Unknown { "以原幂等键重试" } else { "提交原请求" }}</button>
+                <button class="secondary"
+                    disabled=move || recovery.get().is_none() || !phase.get().may_edit()
+                    on:click=move |_| {
+                        if !phase.get_untracked().may_edit() { return; }
+                        let Some(found) = recovery.get_untracked() else { return; };
+                        let client = client.get_value();
+                        phase.set(WritePhase::Preparing);
+                        spawn_local(async move {
+                            match client.discard(&found.write).await {
+                                Ok(()) => {
+                                    recovery.set(None);
+                                    confirmed.set(false);
+                                    message.set(String::new());
+                                    phase.set(WritePhase::Editing);
+                                }
+                                Err(e) => {
+                                    phase.set(WritePhase::Rejected);
+                                    message.set(e.to_string());
+                                }
+                            }
+                        });
+                    }>{move || if phase.get() == WritePhase::Prepared { "放弃未发送请求" } else { "清除恢复记录" }}</button>
+            </div>
+            <pre role="status">{move || message.get()}</pre>
+        </section>
     }
 }
 

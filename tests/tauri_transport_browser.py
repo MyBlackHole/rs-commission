@@ -38,6 +38,7 @@ stub = r'''
    if (!args || args.constructor!==Object) throw 'IPC arguments must be JSON objects';
    if(command==='session_login') return {id,actor:{id,name:'IPC测试管理员',role:'admin',account_id:null,expires_at:'2099-01-01T00:00:00Z'}};
    if(args.session!==id) throw 'wrong session';
+   if(command==='recover_write') return null;
    if(command==='read_resource') {
      if(args.resource==='orders') return {items:[{id,external_id:'order-001',paid_minor:'10000',refunded_minor:'0',captured_at:'2026-09-25T00:00:00Z',released_at:null}],has_more:false,offset:0,limit:50};
      if(args.resource==='payouts') return {items:[{id:payout,external_id:'payout-001',amount_minor:'300',destination_ref:'verified-payee-001',status:'succeeded',provider_reference:'BANK-1',evidence:'核验完成',created_at:'2026-09-25T00:00:00Z',updated_at:'2026-09-25T01:00:00Z'}],has_more:false,offset:0,limit:50};
@@ -107,7 +108,7 @@ try:
         expect(page.get_by_role("button", name="安全登录")).to_be_visible()
         calls = page.evaluate("window.fixtureCalls")
         methods = [c["command"] for c in calls]
-        assert set(methods) == {"session_login", "session_logout", "read_resource", "quote_commission", "order_detail", "payout_detail", "prepare_write", "execute_write", "discard_write"}, methods
+        assert set(methods) == {"session_login", "session_logout", "recover_write", "read_resource", "quote_commission", "order_detail", "payout_detail", "prepare_write", "execute_write", "discard_write"}, methods
         executes = [c for c in calls if c["command"] == "execute_write"]
         assert len(executes) == 2 and executes[0] == executes[1]
         assert all("token" not in c["args"] for c in calls[1:])
