@@ -283,6 +283,9 @@ impl ApiClient {
     pub async fn order(&self, id: Uuid) -> Result<Value> {
         self.get(&format!("orders/{id}")).await
     }
+    pub async fn payout(&self, id: Uuid) -> Result<Value> {
+        self.get(&format!("payouts/{id}")).await
+    }
     async fn get<T: DeserializeOwned>(&self, path: &str) -> Result<T> {
         self.send(
             self.http

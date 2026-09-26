@@ -120,3 +120,21 @@ async fn native_bridge_checks_role_and_resource_allowlist() {
     host.logout(session.id).unwrap();
     assert_eq!(seen.await.unwrap().len(), 1);
 }
+
+#[tokio::test]
+async fn native_bridge_reads_order_detail_through_the_fixed_api_surface() {
+    let actor = r#"{"id":"11111111-1111-4111-8111-111111111111","name":"admin","role":"admin","account_id":null,"expires_at":"2099-01-01T00:00:00Z"}"#;
+    let order_id = Uuid::parse_str("22222222-2222-4222-8222-222222222222").unwrap();
+    let detail = r#"{"order":{"id":"22222222-2222-4222-8222-222222222222","external_id":"order-001"},"allocations":[],"refunds":[]}"#;
+    let (address, seen) = server(vec![("200 OK", actor), ("200 OK", detail)]).await;
+    let host = NativeBridge::default();
+    let session = host.login(&address, "native-secret").await.unwrap();
+    assert!(!serde_json::to_string(&session)
+        .unwrap()
+        .contains("native-secret"));
+    let value = host.order(session.id, order_id).await.unwrap();
+    assert_eq!(value["order"]["external_id"], "order-001");
+    let requests = seen.await.unwrap();
+    assert_eq!(requests.len(), 2);
+    assert!(requests[1].starts_with(&format!("GET /api/v1/orders/{order_id} HTTP/1.1")));
+}

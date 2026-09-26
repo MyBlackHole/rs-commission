@@ -141,6 +141,16 @@ pub async fn payouts(pool: &PgPool, actor: &Actor, input: Page) -> Result<Value>
     page(rows, limit, offset)
 }
 
+pub async fn payout(pool: &PgPool, actor: &Actor, id: Uuid) -> Result<Value> {
+    let row = sqlx::query_as::<_, Payout>("SELECT * FROM payouts WHERE id=$1")
+        .bind(id)
+        .fetch_optional(pool)
+        .await?
+        .ok_or(Error::NotFound)?;
+    actor.check_account(row.account_id)?;
+    Ok(serde_json::to_value(row)?)
+}
+
 pub async fn audit(pool: &PgPool, actor: &Actor, input: Page) -> Result<Value> {
     actor.require(&["operator", "finance", "auditor"])?;
     let (limit, offset) = input.bounds()?;
