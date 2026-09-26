@@ -1,6 +1,6 @@
 use crate::{app::ClientStore, display::display, platform::Write};
 use commission_client::{bridge::WritePhase, Operation};
-use commission_types::{Actor, PayoutOutcome, ReasonInput};
+use commission_types::{PayoutOutcome, ReasonInput};
 use leptos::prelude::*;
 use serde_json::Value;
 use uuid::Uuid;
@@ -10,7 +10,7 @@ use wasm_bindgen_futures::spawn_local;
 pub fn PayoutsPanel(
     client: ClientStore,
     phase: RwSignal<WritePhase>,
-    actor: Actor,
+    can_manage: bool,
 ) -> impl IntoView {
     let offset = RwSignal::new(0_u32);
     let list = RwSignal::new(None::<Result<Value, String>>);
@@ -97,7 +97,7 @@ pub fn PayoutsPanel(
                             payout_id
                             value
                             phase
-                            actor=actor.clone()
+                            can_manage
                             on_refresh=Callback::new(move |_| {
                                 detail_reload.update(|v| *v = v.wrapping_add(1));
                                 list_reload.update(|v| *v = v.wrapping_add(1));
@@ -154,7 +154,7 @@ fn PayoutDetail(
     payout_id: Uuid,
     value: Value,
     phase: RwSignal<WritePhase>,
-    actor: Actor,
+    can_manage: bool,
     on_refresh: Callback<()>,
 ) -> impl IntoView {
     let status = value["status"].as_str().unwrap_or_default().to_owned();
@@ -179,8 +179,6 @@ fn PayoutDetail(
         }
     })
     .collect_view();
-    let can_manage = Operation::ApprovePayout.allowed(&actor);
-
     view! {
         <div class="metrics payout-summary">{cards}</div>
         <details open>
