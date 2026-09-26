@@ -76,6 +76,7 @@ fn Shell(session: Session, auth: Auth) -> impl IntoView {
     let error = RwSignal::new(String::new());
     let logging_out = RwSignal::new(false);
     let is_member = session.actor.role == "member";
+    let can_refund = Operation::Refund.allowed(&session.actor);
     let links = RESOURCES.iter().filter(|(r, _)| !is_member || ["dashboard", "accounts", "commissions", "wallets", "payouts", "ledger"].contains(r))
         .map(|&(resource, title)| view! {
             <button class=move || if view.get() == resource { "nav active" } else { "nav" }
@@ -114,7 +115,7 @@ fn Shell(session: Session, auth: Auth) -> impl IntoView {
                     <crate::orders::OrdersPanel
                         client
                         phase
-                        can_refund=Operation::Refund.allowed(&session.actor)
+                        can_refund
                     />
                 }.into_any(),
                 _ => view! { <ReadPanel client resource=view offset/> }.into_any(),

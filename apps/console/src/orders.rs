@@ -97,10 +97,10 @@ pub fn OrdersPanel(
                             value
                             phase
                             can_refund
-                            on_refresh=move |_| {
+                            on_refresh=Callback::new(move |_| {
                                 detail_reload.update(|v| *v = v.wrapping_add(1));
                                 list_reload.update(|v| *v = v.wrapping_add(1));
-                            }
+                            })
                         />
                     }.into_any(),
                 }}
