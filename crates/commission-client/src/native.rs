@@ -106,6 +106,11 @@ impl NativeBridge {
         self.lock()?.session(id)?;
         result
     }
+    pub async fn order(&self, id: Uuid, order_id: Uuid) -> Result<Value> {
+        let result = self.client(id)?.order(order_id).await;
+        self.lock()?.session(id)?;
+        result
+    }
     pub fn prepare(
         &self,
         id: Uuid,
