@@ -231,6 +231,35 @@ async fn full_lifecycle_keeps_history_and_records_post_payout_debt(pool: PgPool)
 }
 
 #[sqlx::test(migrations = "./migrations")]
+async fn payout_detail_respects_account_scope(pool: PgPool) {
+    let f = Fixture::new(pool, 0).await;
+    let order = f.capture("order-payout-detail").await;
+    f.release(order).await;
+    let payout = f.payout(f.direct, "pay-detail", "100").await;
+
+    let detail = get(&f.app, &f.finance, &format!("/payouts/{payout}")).await;
+    assert_eq!(detail["external_id"], "pay-detail");
+    assert_eq!(detail["amount_minor"], "100");
+    assert_eq!(detail["status"], "requested");
+
+    let member = Fixture::credential(&f.app, &f.admin, "member", Some(f.direct)).await;
+    let member_detail = get(&f.app, &member, &format!("/payouts/{payout}")).await;
+    assert_eq!(member_detail["account_id"], f.direct.to_string());
+
+    let other_member = Fixture::credential(&f.app, &f.admin, "member", Some(f.merchant)).await;
+    let (status, _) = call(
+        &f.app,
+        &other_member,
+        "GET",
+        &format!("/payouts/{payout}"),
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+#[sqlx::test(migrations = "./migrations")]
 async fn partial_refund_before_release_only_thaws_remaining_funds(pool: PgPool) {
     let f = Fixture::new(pool, 0).await;
     let order = f.capture("order-partial").await;

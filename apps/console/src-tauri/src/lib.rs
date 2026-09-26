@@ -43,6 +43,14 @@ async fn order_detail(state: State<'_, NativeBridge>, session: Uuid, order: Uuid
     state.order(session, order).await
 }
 #[tauri::command]
+async fn payout_detail(
+    state: State<'_, NativeBridge>,
+    session: Uuid,
+    payout: Uuid,
+) -> Result<Value> {
+    state.payout(session, payout).await
+}
+#[tauri::command]
 fn prepare_write(
     state: State<'_, NativeBridge>,
     session: Uuid,
@@ -74,6 +82,7 @@ pub fn run() {
             read_resource,
             quote_commission,
             order_detail,
+            payout_detail,
             prepare_write,
             execute_write,
             discard_write

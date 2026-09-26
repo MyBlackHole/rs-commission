@@ -1,6 +1,7 @@
 mod app;
 mod display;
 mod orders;
+mod payouts;
 mod platform;
 
 fn main() {

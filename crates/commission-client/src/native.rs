@@ -111,6 +111,11 @@ impl NativeBridge {
         self.lock()?.session(id)?;
         result
     }
+    pub async fn payout(&self, id: Uuid, payout_id: Uuid) -> Result<Value> {
+        let result = self.client(id)?.payout(payout_id).await;
+        self.lock()?.session(id)?;
+        result
+    }
     pub fn prepare(
         &self,
         id: Uuid,

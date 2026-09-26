@@ -77,6 +77,7 @@ fn Shell(session: Session, auth: Auth) -> impl IntoView {
     let logging_out = RwSignal::new(false);
     let is_member = session.actor.role == "member";
     let can_refund = Operation::Refund.allowed(&session.actor);
+    let can_manage_payout = Operation::ApprovePayout.allowed(&session.actor);
     let links = RESOURCES.iter().filter(|(r, _)| !is_member || ["dashboard", "accounts", "commissions", "wallets", "payouts", "ledger"].contains(r))
         .map(|&(resource, title)| view! {
             <button class=move || if view.get() == resource { "nav active" } else { "nav" }
@@ -116,6 +117,13 @@ fn Shell(session: Session, auth: Auth) -> impl IntoView {
                         client
                         phase
                         can_refund
+                    />
+                }.into_any(),
+                "payouts" => view! {
+                    <crate::payouts::PayoutsPanel
+                        client
+                        phase
+                        can_manage=can_manage_payout
                     />
                 }.into_any(),
                 _ => view! { <ReadPanel client resource=view offset/> }.into_any(),
@@ -251,7 +259,16 @@ fn QuotePanel(client: ClientStore) -> impl IntoView {
 fn Operations(client: ClientStore, actor: Actor, phase: RwSignal<WritePhase>) -> impl IntoView {
     let allowed: Vec<_> = Operation::ALL
         .into_iter()
-        .filter(|op| op.allowed(&actor))
+        .filter(|op| {
+            op.allowed(&actor)
+                && !matches!(
+                    op,
+                    Operation::ApprovePayout
+                        | Operation::ProcessPayout
+                        | Operation::RejectPayout
+                        | Operation::PayoutOutcome
+                )
+        })
         .collect();
     let Some(first) = allowed.first().copied() else {
         return view! { <p>"当前身份无写入权限"</p> }.into_any();

@@ -1,4 +1,4 @@
 [[permission]]
 identifier = "commission-bridge"
 description = "Access to session-scoped commission operations from the bundled main window."
-commands.allow = ["session_login", "session_logout", "read_resource", "quote_commission", "order_detail", "prepare_write", "execute_write", "discard_write"]
+commands.allow = ["session_login", "session_logout", "read_resource", "quote_commission", "order_detail", "payout_detail", "prepare_write", "execute_write", "discard_write"]
