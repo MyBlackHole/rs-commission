@@ -156,6 +156,9 @@ with sync_playwright() as p:
     expect(page.get_by_role("button", name="退出并清除会话")).to_be_disabled()
     op.get_by_role("button", name="以原幂等键重试").click()
     expect(op.get_by_role("button", name="返回编辑 / 新操作")).to_be_enabled()
+    op.get_by_role("button", name="返回编辑 / 新操作").click()
+    expect(op.locator("textarea")).to_be_enabled()
+    expect(page.locator("nav").get_by_role("button", name="业务总览", exact=True)).to_be_enabled()
     generic_pair = [w for w in writes if w["url"].endswith("/api/v1/accounts")]
     assert len(generic_pair) == 2 and generic_pair[0]["key"] and generic_pair[0] == generic_pair[1]
     assert page.locator("img").count() == 0
