@@ -5,6 +5,7 @@ fn main() {
             "session_logout",
             "read_resource",
             "quote_commission",
+            "order_detail",
             "prepare_write",
             "execute_write",
             "discard_write",

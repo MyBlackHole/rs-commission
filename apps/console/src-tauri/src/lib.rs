@@ -39,6 +39,10 @@ async fn quote_commission(
     state.quote(session, &input).await
 }
 #[tauri::command]
+async fn order_detail(state: State<'_, NativeBridge>, session: Uuid, order: Uuid) -> Result<Value> {
+    state.order(session, order).await
+}
+#[tauri::command]
 fn prepare_write(
     state: State<'_, NativeBridge>,
     session: Uuid,
@@ -69,6 +73,7 @@ pub fn run() {
             session_logout,
             read_resource,
             quote_commission,
+            order_detail,
             prepare_write,
             execute_write,
             discard_write

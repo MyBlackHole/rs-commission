@@ -2,3 +2,5 @@
 /* A 1fr track has an automatic intrinsic minimum. Explicitly allow it and the
    sidebar to shrink, then scroll the navigation itself rather than the page. */
 @media(max-width:900px){.shell{grid-template-columns:minmax(0,1fr)}aside{padding:15px}.brand{padding:0 5px 10px}.brand h1{font-size:20px}nav{flex-direction:row;overflow-x:auto;padding-bottom:5px}.nav{white-space:nowrap;flex-shrink:0}.sidebar-note{display:none}.workspace{padding:16px}.panel{padding:18px}.form-grid{grid-template-columns:minmax(0,1fr)}.metric strong{font-size:19px}.pagination{flex-wrap:wrap}header{font-size:14px;flex-wrap:wrap}.actions{flex-wrap:wrap}.login{padding:26px}}
+
+.order-detail h3{font-size:16px;margin:24px 0 10px}.order-summary{margin-bottom:22px}.refund-box{margin-top:26px;padding:20px;border:1px solid #dce5f3;border-radius:12px;background:#f9fbff}.refund-box h3{margin-top:0}.order-detail table button{white-space:nowrap}

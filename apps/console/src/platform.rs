@@ -118,6 +118,20 @@ impl Client {
             .await
         }
     }
+    pub async fn order(&self, order_id: Uuid) -> Result<Value> {
+        #[cfg(not(feature = "tauri"))]
+        {
+            self.inner.order(order_id).await
+        }
+        #[cfg(feature = "tauri")]
+        {
+            invoke(
+                "order_detail",
+                serde_json::json!({"session": self.id,"order": order_id}),
+            )
+            .await
+        }
+    }
     pub async fn prepare(
         &self,
         operation: Operation,

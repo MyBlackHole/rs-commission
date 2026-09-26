@@ -16,7 +16,7 @@ struct Session {
     actor: Actor,
 }
 type Auth = RwSignal<Option<Session>, LocalStorage>;
-type ClientStore = StoredValue<Client, LocalStorage>;
+pub(crate) type ClientStore = StoredValue<Client, LocalStorage>;
 
 #[component]
 pub fn App() -> impl IntoView {
@@ -76,9 +76,11 @@ fn Shell(session: Session, auth: Auth) -> impl IntoView {
     let error = RwSignal::new(String::new());
     let logging_out = RwSignal::new(false);
     let is_member = session.actor.role == "member";
+    let can_refund = Operation::Refund.allowed(&session.actor);
     let links = RESOURCES.iter().filter(|(r, _)| !is_member || ["dashboard", "accounts", "commissions", "wallets", "payouts", "ledger"].contains(r))
         .map(|&(resource, title)| view! {
             <button class=move || if view.get() == resource { "nav active" } else { "nav" }
+                disabled=move || phase.get() != WritePhase::Editing
                 on:click=move |_| { offset.set(0); view.set(resource.to_owned()); }>{title}</button>
         }).collect_view();
     view! {
@@ -86,14 +88,15 @@ fn Shell(session: Session, auth: Auth) -> impl IntoView {
             <div class="brand"><h1>"分润台"</h1><small>"LEPTOS · TAURI · RUST"</small></div>
             <nav>{links}{(!is_member).then(|| view! {
                 <button class=move || if view.get() == "quote" { "nav active" } else { "nav" }
+                    disabled=move || phase.get() != WritePhase::Editing
                     on:click=move |_| view.set("quote".into())>"佣金试算"</button>
             })}</nav>
             <p class="sidebar-note">"单平台 · CNY / 结算以服务器账本为准"</p>
         </aside><main class="workspace">
             <header><div><strong>{session.actor.name.clone()}</strong><span class="tag">{session.actor.role.clone()}</span></div>
-                <button class="secondary" disabled=move || phase.get().unresolved() || logging_out.get()
+                <button class="secondary" disabled=move || phase.get() != WritePhase::Editing || logging_out.get()
                     on:click=move |_| {
-                        if phase.get_untracked().unresolved() || logging_out.get_untracked() { return; }
+                        if phase.get_untracked() != WritePhase::Editing || logging_out.get_untracked() { return; }
                         logging_out.set(true);
                         let client = client.get_value();
                         spawn_local(async move {
@@ -106,10 +109,17 @@ fn Shell(session: Session, auth: Auth) -> impl IntoView {
             </header>
             <p class="error" role="alert">{move || error.get()}</p>
             <p class="notice">"外部人工转账模式：登记执行不会自动付款。结果未知时不能退出或另建请求；请保留幂等键核验，勿关闭程序。"</p>
-            <Show when=move || view.get() == "quote"
-                fallback=move || view! { <ReadPanel client resource=view offset/> }>
-                <QuotePanel client/>
-            </Show>
+            {move || match view.get().as_str() {
+                "quote" => view! { <QuotePanel client/> }.into_any(),
+                "orders" => view! {
+                    <crate::orders::OrdersPanel
+                        client
+                        phase
+                        can_refund
+                    />
+                }.into_any(),
+                _ => view! { <ReadPanel client resource=view offset/> }.into_any(),
+            }}
             <Operations client actor=session.actor phase/>
         </main></div>
     }

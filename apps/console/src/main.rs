@@ -1,5 +1,6 @@
 mod app;
 mod display;
+mod orders;
 mod platform;
 
 fn main() {
