@@ -177,14 +177,22 @@ fn OrderDetail(
     let cards = [
         ("订单号", display("external_id", &order["external_id"])),
         ("实付金额", display("paid_minor", &order["paid_minor"])),
-        ("已退款", display("refunded_minor", &order["refunded_minor"])),
+        (
+            "已退款",
+            display("refunded_minor", &order["refunded_minor"]),
+        ),
         ("剩余可退", format!("¥ {}", Money(remaining).yuan())),
-        ("佣金池", display("fee_pool_minor", &order["fee_pool_minor"])),
+        (
+            "佣金池",
+            display("fee_pool_minor", &order["fee_pool_minor"]),
+        ),
         ("解冻时间", display("unlock_at", &order["unlock_at"])),
     ]
     .into_iter()
-    .map(|(name, content)| view! {
-        <article class="metric"><span>{name}</span><strong>{content}</strong></article>
+    .map(|(name, content)| {
+        view! {
+            <article class="metric"><span>{name}</span><strong>{content}</strong></article>
+        }
     })
     .collect_view();
     let allocation_rows = allocations

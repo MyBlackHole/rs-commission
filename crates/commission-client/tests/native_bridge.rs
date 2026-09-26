@@ -121,7 +121,6 @@ async fn native_bridge_checks_role_and_resource_allowlist() {
     assert_eq!(seen.await.unwrap().len(), 1);
 }
 
-
 #[tokio::test]
 async fn native_bridge_reads_order_detail_through_the_fixed_api_surface() {
     let actor = r#"{"id":"11111111-1111-4111-8111-111111111111","name":"admin","role":"admin","account_id":null,"expires_at":"2099-01-01T00:00:00Z"}"#;
@@ -134,8 +133,6 @@ async fn native_bridge_reads_order_detail_through_the_fixed_api_surface() {
     assert_eq!(value["order"]["external_id"], "order-001");
     let requests = seen.await.unwrap();
     assert_eq!(requests.len(), 2);
-    assert!(requests[1].starts_with(&format!(
-        "GET /api/v1/orders/{order_id} HTTP/1.1"
-    )));
+    assert!(requests[1].starts_with(&format!("GET /api/v1/orders/{order_id} HTTP/1.1")));
     assert!(!requests[1].contains("native-secret"));
 }

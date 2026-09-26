@@ -39,11 +39,7 @@ async fn quote_commission(
     state.quote(session, &input).await
 }
 #[tauri::command]
-async fn order_detail(
-    state: State<'_, NativeBridge>,
-    session: Uuid,
-    order: Uuid,
-) -> Result<Value> {
+async fn order_detail(state: State<'_, NativeBridge>, session: Uuid, order: Uuid) -> Result<Value> {
     state.order(session, order).await
 }
 #[tauri::command]
