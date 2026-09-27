@@ -185,7 +185,14 @@ async fn observations_cannot_cross_connections_and_are_append_only(pool: PgPool)
 #[sqlx::test(migrations = "./migrations")]
 async fn commission_observations_preserve_unknown_vs_zero_and_projection_ownership(pool: PgPool) {
     let connection = connection(&pool, "taobao", "publisher-2").await;
-    let event = raw_event(&pool, connection, "commissions", Some("commission-event-1"), '1').await;
+    let event = raw_event(
+        &pool,
+        connection,
+        "commissions",
+        Some("commission-event-1"),
+        '1',
+    )
+    .await;
     let observation = Uuid::new_v4();
 
     sqlx::query(
