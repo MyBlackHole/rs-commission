@@ -80,7 +80,7 @@ fn discard_write(state: State<'_, NativeBridge>, session: Uuid, request: Uuid) -
     state.discard(session, request)
 }
 
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
+#[cfg(target_os = "windows")]
 fn build_declared_windows(app: &tauri::App) -> tauri::Result<()> {
     let windows = app.config().app.windows.clone();
     for config in &windows {
@@ -108,7 +108,7 @@ pub fn run() {
             let path = app.path().app_data_dir()?.join("pending-write-v1.json");
             app.manage(NativeBridge::persistent(path)?);
 
-            #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            #[cfg(target_os = "windows")]
             build_declared_windows(app)?;
 
             Ok(())
