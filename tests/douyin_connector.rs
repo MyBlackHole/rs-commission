@@ -59,6 +59,41 @@ impl DouyinTransport for FixtureTransport {
     }
 }
 
+#[derive(Clone)]
+struct CheckpointAdvancingTransport {
+    pool: PgPool,
+    connection_id: Uuid,
+    response: Value,
+}
+
+#[async_trait]
+impl DouyinTransport for CheckpointAdvancingTransport {
+    async fn execute(
+        &self,
+        _endpoint: &str,
+        _path: &str,
+        _common: &BTreeMap<String, String>,
+        _body: &str,
+    ) -> Result<Value> {
+        sqlx::query(
+            "INSERT INTO platform_sync_checkpoints
+             (connection_id,stream,cursor,last_platform_updated_at,last_attempt_at,last_success_at)
+             VALUES($1,'douyin_alliance_reconcile','other-worker',
+                    '2026-09-27T08:05:00Z',now(),now())
+             ON CONFLICT(connection_id,stream) DO UPDATE SET
+                cursor=EXCLUDED.cursor,
+                last_platform_updated_at=EXCLUDED.last_platform_updated_at,
+                last_attempt_at=EXCLUDED.last_attempt_at,
+                last_success_at=EXCLUDED.last_success_at,
+                updated_at=now()",
+        )
+        .bind(self.connection_id)
+        .execute(&self.pool)
+        .await?;
+        Ok(self.response.clone())
+    }
+}
+
 fn at(value: &str) -> DateTime<Utc> {
     DateTime::parse_from_rfc3339(value)
         .unwrap()
@@ -387,6 +422,84 @@ async fn refund_and_handshake_are_persisted_without_financial_posting(pool: PgPo
     .await
     .unwrap();
     assert_eq!(preserved, (Some(10000), Some(1000)));
+
+    let ledger_count: i64 = sqlx::query_scalar("SELECT count(*) FROM ledger_entries")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(ledger_count, 0);
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn stale_reconciliation_worker_keeps_raw_page_but_cannot_overwrite_checkpoint(pool: PgPool) {
+    let connection_id = connection(&pool).await;
+    let response = json!({
+        "code": 10000,
+        "msg": "success",
+        "data": {
+            "order_list": [{
+                "order_id": "DOU-RACE-1",
+                "author_id": "KOL-RACE",
+                "pay_amount": 10000,
+                "commission_amount": 1000,
+                "status": "PAID",
+                "pay_time": 1790495700_i64,
+                "update_time": 1790495700_i64
+            }]
+        }
+    });
+    let transport = CheckpointAdvancingTransport {
+        pool: pool.clone(),
+        connection_id,
+        response,
+    };
+    let sync = DouyinAllianceSync::new(
+        pool.clone(),
+        connection_id,
+        DouyinClient::new(DouyinApiSigner::new(credentials()), transport),
+    );
+
+    let error = sync
+        .reconcile_page(
+            &json!({"start_time":1790494800_i64,"end_time":1790496600_i64}),
+            at("2026-09-27T08:10:00Z"),
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        error,
+        commission::platform::PlatformError::ConcurrentSync
+    ));
+
+    let raw: (i64, String) = sqlx::query_as(
+        "SELECT count(*),min(processing_status)
+         FROM platform_raw_events
+         WHERE connection_id=$1 AND stream='douyin_alliance_reconcile'",
+    )
+    .bind(connection_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(raw, (1, "pending".into()));
+
+    let observations: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM external_order_observations WHERE connection_id=$1",
+    )
+    .bind(connection_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(observations, 0);
+
+    let cursor: Option<String> = sqlx::query_scalar(
+        "SELECT cursor FROM platform_sync_checkpoints
+         WHERE connection_id=$1 AND stream='douyin_alliance_reconcile'",
+    )
+    .bind(connection_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(cursor.as_deref(), Some("other-worker"));
 
     let ledger_count: i64 = sqlx::query_scalar("SELECT count(*) FROM ledger_entries")
         .fetch_one(&pool)
