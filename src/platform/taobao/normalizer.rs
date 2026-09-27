@@ -6,7 +6,7 @@ use crate::{
     },
 };
 use chrono::{DateTime, FixedOffset, NaiveDateTime, TimeZone, Utc};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 #[derive(Debug, Deserialize)]
@@ -34,7 +34,7 @@ struct Results {
     publisher_order_dto: Vec<OrderDto>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 struct OrderDto {
     trade_id: String,
     trade_parent_id: Option<String>,
