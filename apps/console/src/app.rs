@@ -379,7 +379,7 @@ fn Operations(client: ClientStore, actor: Actor, phase: RwSignal<WritePhase>) ->
         })
         .collect();
     let Some(first) = allowed.first().copied() else {
-        return view! { <></> }.into_any();
+        return ().into_any();
     };
     let operation = RwSignal::new(first);
     let body = RwSignal::new(first.example().to_owned());
