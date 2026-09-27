@@ -610,6 +610,7 @@ dependencies = [
  "commission-types",
  "hex",
  "hmac",
+ "md-5",
  "http-body-util",
  "proptest",
  "rand 0.8.8",
