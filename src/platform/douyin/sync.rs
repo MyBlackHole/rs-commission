@@ -332,8 +332,7 @@ impl<T: DouyinTransport> DouyinAllianceSync<T> {
 
         let mut tx = self.pool.begin().await?;
         configure(&mut tx).await?;
-        let current_checkpoint =
-            lock_reconcile_checkpoint(&mut tx, self.connection_id).await?;
+        let current_checkpoint = lock_reconcile_checkpoint(&mut tx, self.connection_id).await?;
         if current_checkpoint != checkpoint {
             return Err(PlatformError::ConcurrentSync);
         }
