@@ -89,10 +89,7 @@ impl MeituanSigner {
             ("Content-Type".into(), CONTENT_TYPE.into()),
             ("S-Ca-App".into(), self.credentials.app_key.clone()),
             ("S-Ca-Signature".into(), signature),
-            (
-                "S-Ca-Signature-Headers".into(),
-                SIGNATURE_HEADERS.into(),
-            ),
+            ("S-Ca-Signature-Headers".into(), SIGNATURE_HEADERS.into()),
             ("S-Ca-Timestamp".into(), timestamp_ms.to_string()),
         ]))
     }
