@@ -80,12 +80,37 @@ fn discard_write(state: State<'_, NativeBridge>, session: Uuid, request: Uuid) -
     state.discard(session, request)
 }
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+fn build_declared_windows(app: &tauri::App) -> tauri::Result<()> {
+    let windows = app.config().app.windows.clone();
+    for config in &windows {
+        let mut builder = tauri::WebviewWindowBuilder::from_config(app.handle(), config)?;
+
+        #[cfg(target_os = "windows")]
+        if let Ok(driver_args) = std::env::var("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS") {
+            let driver_args = driver_args.trim();
+            if !driver_args.is_empty() {
+                builder = builder.additional_browser_args(&format!(
+                    "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection {driver_args}"
+                ));
+            }
+        }
+
+        builder.build()?;
+    }
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .setup(|app| {
             let path = app.path().app_data_dir()?.join("pending-write-v1.json");
             app.manage(NativeBridge::persistent(path)?);
+
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            build_declared_windows(app)?;
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
