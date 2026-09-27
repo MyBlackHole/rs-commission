@@ -48,7 +48,8 @@ struct OrderDto {
     pay_price: Option<String>,
     pub_share_pre_fee: Option<String>,
     pub_share_fee: Option<String>,
-    total_commission_fee: Option<String>,
+    pub_share_pre_fee_for_commission: Option<String>,
+    pub_share_fee_for_commission: Option<String>,
     alimama_share_fee: Option<String>,
     tk_paid_time: Option<String>,
     tb_paid_time: Option<String>,
@@ -129,7 +130,7 @@ pub fn normalize_order_page(raw: &Value) -> Result<NormalizedPage> {
         let gross_minor = if dto.tk_status == 12 {
             money(dto.pub_share_pre_fee.as_deref())?
         } else {
-            money(dto.pub_share_fee.as_deref())?.or(money(dto.total_commission_fee.as_deref())?)
+            money(dto.pub_share_fee.as_deref())?
         };
         let platform_service_fee_minor = money(dto.alimama_share_fee.as_deref())?;
         let net_minor = match (gross_minor, platform_service_fee_minor) {
@@ -166,6 +167,8 @@ pub fn normalize_order_page(raw: &Value) -> Result<NormalizedPage> {
             metadata: json!({
                 "relation_id": dto.relation_id,
                 "tk_earning_time": dto.tk_earning_time,
+                "pub_share_pre_fee_for_commission": dto.pub_share_pre_fee_for_commission,
+                "pub_share_fee_for_commission": dto.pub_share_fee_for_commission,
             }),
         });
     }
