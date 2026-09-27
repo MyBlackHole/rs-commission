@@ -10,7 +10,7 @@
 
 | 层次 | 检查内容 |
 |---|---|
-| Rust 测试 | 47 个：10 个共享金额/领域测试，4 个 SDK/状态单元测试，4 个传输测试，3 个原生桥测试，22 个既有 PostgreSQL 集成测试，4 个外部平台接入 PostgreSQL 约束测试 |
+| Rust 测试 | 50 个：10 个共享金额/领域测试，4 个 SDK/状态单元测试，4 个传输测试，3 个原生桥测试，22 个既有 PostgreSQL 集成测试，4 个外部平台接入 PostgreSQL 约束测试，3 个淘宝 Connector 签名/分页/并发同步测试 |
 | PostgreSQL | 使用真实 PostgreSQL 18 容器；并发幂等、退款/解冻、欠款、提现、账本约束，以及外部平台 RawEvent 去重/不可变、connection ownership、observation append-only、projection 与 checkpoint 约束 |
 | Web | Leptos WASM check/Clippy，Trunk release，依赖隔离与锁文件不变 |
 | Tauri 页面 | 同一 UI 按 tauri feature 构建；仍是 WASM，不是原生控件 |
@@ -28,6 +28,8 @@
 
 外部平台接入第一阶段由 `migrations/0002_platform_integration.sql` 提供，只建立 ingestion/normalization 数据域，不修改 accounts.kind、wallets、journals/ledger_entries 或现有订单计佣。Raw platform payload 先持久化到 append-first `platform_raw_events`；有外部 event id 时按 event id 去重，无 event id 时按 connection + stream + event_type + payload hash 去重。原始 payload/identity 不可修改，normalized observations append-only，current projections 与 checkpoints 可更新；组合外键强制 observation/raw-event 以及 projection/latest-observation 属于同一 connection 与业务键。平台未提供的费用保留 NULL，与已知为 0 严格区分。第一阶段不会因为淘宝/抖音/美图订单 GMV 产生任何 LedgerEntry。
 
+淘宝 Connector 第一阶段使用 `taobao.tbk.sc.order.details.get` 的更新时间增量同步：固定 20 分钟查询窗口、5 分钟 overlap，并用 `position_index` 在同一窗口内连续翻页。TOP 参数按 GMT+8 生成并使用 HMAC-SHA256 签名；响应先持久化为 RawEvent，再规范化为订单/佣金 observation，并在同一数据库事务内更新 current projection 与 checkpoint。并发 worker 在网络请求期间若发现 checkpoint 已被其他 worker 推进，会保留已抓取 RawEvent 但拒绝覆盖新 checkpoint。淘宝订单 GMV、付款/结算预估佣金不会直接写入现有 Ledger；`tk_status=3` 仍只标记为外部 `accrued/receivable`，等待后续平台最终结算/到账对账阶段再连接 Entitlement。
+
 ## 本轮发现并修复
 
 首轮 `081cf44` 的 40 个 Rust 测试和 Web 构建/既有回归通过，但截图人工复核发现分页按钮把未加花括号的 >= 表达式解析成文本；因此首轮的成功不作为 UI 完成证明。已将该属性表达式显式包裹，并补充下一页/上一页实际请求断言。普通资源页采用稳定 Show 分支，避免切换列表时重建整个 ReadPanel。
@@ -36,7 +38,7 @@ tests/tauri_transport_browser.py 覆盖 tauri-feature WASM 与 IPC 编码夹具�
 
 ## 证据获取
 
-核心迁移基线见 PR #1；真实 Tauri 生命周期恢复见 PR #8 / Actions run 36280126043；外部平台接入数据域见 PR #15。
+核心迁移基线见 PR #1；真实 Tauri 生命周期恢复见 PR #8 / Actions run 36280126043；外部平台接入数据域见 PR #15；淘宝联盟订单同步第一阶段见 PR #17。
 
 CI 产物包括 rs-commission-source、commission-console-web、commission-console-tauri-assets、browser-qa、real-stack-e2e 和 tauri-lifecycle-e2e。tauri-lifecycle-e2e 保存两阶段 driver 日志与去敏 result.json；GITHUB_SHA 在 PR CI 中可能是合并测试提交，不代表已合并 main。
 
