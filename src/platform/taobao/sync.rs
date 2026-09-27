@@ -306,4 +306,3 @@ fn next_window(
     }
     Ok((now - Duration::minutes(WINDOW_MINUTES), now, None))
 }
-
