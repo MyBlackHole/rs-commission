@@ -276,6 +276,55 @@ async fn refund_and_handshake_are_persisted_without_financial_posting(pool: PgPo
     assert_eq!(result.raw_events, 1);
     assert_eq!(result.order_observations, 0);
 
+    let second_handshake =
+        br#"[{"tag":"0","msg_id":"0","data":"2026-09-27T16:01:00+08:00"}]"#;
+    let second = sync
+        .ingest_webhook(
+            &verifier,
+            "test-app",
+            &sign_message(second_handshake),
+            second_handshake,
+            at("2026-09-27T08:01:00Z"),
+        )
+        .await
+        .unwrap();
+    assert_eq!(second.raw_events, 1);
+
+    let unrelated = br#"[{"tag":"100","msg_id":"trade-1","data":{"order_id":"OTHER"}}]"#;
+    let ignored = sync
+        .ingest_webhook(
+            &verifier,
+            "test-app",
+            &sign_message(unrelated),
+            unrelated,
+            at("2026-09-27T08:02:00Z"),
+        )
+        .await
+        .unwrap();
+    assert_eq!(ignored.ignored_messages, 1);
+
+    let pay = serde_json::to_vec(&json!([{
+        "tag": 804,
+        "msg_id": "refund-order-pay",
+        "data": {
+            "order_id":"DOU-REFUND-1",
+            "author_id":"KOL-9",
+            "pay_amount":10000,
+            "commission_amount":1000,
+            "update_time":1790496200_i64
+        }
+    }]))
+    .unwrap();
+    sync.ingest_webhook(
+        &verifier,
+        "test-app",
+        &sign_message(&pay),
+        &pay,
+        at("2026-09-27T08:03:00Z"),
+    )
+    .await
+    .unwrap();
+
     let refund = serde_json::to_vec(&json!([{
         "tag": 805,
         "msg_id": 9001,
@@ -286,7 +335,6 @@ async fn refund_and_handshake_are_persisted_without_financial_posting(pool: PgPo
             "refund_status":"SUCCESS",
             "refund_amount":5000,
             "commission_refund_amount":500,
-            "commission_amount":1000,
             "update_time":1790496300_i64,
             "refund_time":1790496300_i64
         }
@@ -324,6 +372,20 @@ async fn refund_and_handshake_are_persisted_without_financial_posting(pool: PgPo
     .await
     .unwrap();
     assert_eq!(phase, "reversed");
+
+    let preserved: (Option<i64>, Option<i64>) = sqlx::query_as(
+        "SELECT o.paid_minor,c.gross_minor
+         FROM external_orders o
+         JOIN external_commissions c
+           ON c.connection_id=o.connection_id
+          AND c.external_order_line_id=o.external_order_line_id
+         WHERE o.connection_id=$1 AND o.external_order_line_id='DOU-REFUND-1'",
+    )
+    .bind(connection_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(preserved, (Some(10000), Some(1000)));
 
     let ledger_count: i64 = sqlx::query_scalar("SELECT count(*) FROM ledger_entries")
         .fetch_one(&pool)
