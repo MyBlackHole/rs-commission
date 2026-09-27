@@ -14,6 +14,8 @@ pub enum PlatformError {
     Remote(String),
     #[error("平台数据持久化失败")]
     Database(#[from] sqlx::Error),
+    #[error("{0}")]
+    Core(#[from] crate::error::Error),
     #[error("平台 JSON 解析失败")]
     Json(#[from] serde_json::Error),
     #[error("{0}")]
