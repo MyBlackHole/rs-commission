@@ -62,7 +62,7 @@ CREATE UNIQUE INDEX raw_event_external_id
     ON platform_raw_events(connection_id, stream, external_event_id)
     WHERE external_event_id IS NOT NULL;
 CREATE UNIQUE INDEX raw_event_payload_fallback
-    ON platform_raw_events(connection_id, stream, payload_hash)
+    ON platform_raw_events(connection_id, stream, event_type, payload_hash)
     WHERE external_event_id IS NULL;
 CREATE INDEX raw_event_processing
     ON platform_raw_events(processing_status, received_at, id);
