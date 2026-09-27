@@ -100,7 +100,7 @@ cargo tauri ios dev
 
 访问令牌始终只保存在运行期内存；待确认写请求的 path/body/idempotency key 可持久化用于恢复：Web 写入同源 localStorage，Tauri 写入应用数据目录。原生 UI 仍只收到会话和请求句柄；令牌录入仍经过 WebView，不能据此宣称防御已被入侵的前端或本机。权限仅开放本地 main 窗口的十个限定业务命令，没有通用 HTTP 代理、Shell、文件系统权限。
 
-未知结果不能丢弃或切换账号，只能原 key/body 重试。首次发送前先持久化已进入发送边界的标记；刷新或重启后必须重新认证同一 API origin + actor，随后恢复原请求。原生已完成操作缓存结果，避免 IPC 响应丢失后再次发 HTTP 请求。Linux CI 已用真实 Tauri/WebKitGTK 窗口验证 503 后 SIGKILL 进程、重启并恢复原 path/body/key。恢复记录不含 bearer token，但包含业务请求体；它不是服务端资金队列，也不能防御本机或同源前端已被攻陷。
+未知结果不能丢弃或切换账号，只能原 key/body 重试。首次发送前先持久化已进入发送边界的标记；刷新或重启后必须重新认证同一 API origin + actor，随后恢复原请求。原生已完成操作缓存结果，避免 IPC 响应丢失后再次发 HTTP 请求。Linux 与 Windows CI 已分别用真实 Tauri/WebKitGTK 和 Tauri/WebView2 窗口验证：503 后强杀宿主（SIGKILL / taskkill）、启动新进程并恢复原 path/body/key。恢复记录不含 bearer token，但包含业务请求体；它不是服务端资金队列，也不能防御本机或同源前端已被攻陷。
 
 **不会自动代付。** 结算仍是人工转账后的核验登记，尚未接真实渠道、验签、外部账单、实人认证、税务或风控。
 
