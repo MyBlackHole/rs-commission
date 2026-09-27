@@ -44,11 +44,7 @@ struct CheckpointAdvancingTransport {
 
 #[async_trait]
 impl TaobaoTransport for CheckpointAdvancingTransport {
-    async fn execute(
-        &self,
-        _endpoint: &str,
-        _params: &BTreeMap<String, String>,
-    ) -> Result<Value> {
+    async fn execute(&self, _endpoint: &str, _params: &BTreeMap<String, String>) -> Result<Value> {
         sqlx::query(
             "INSERT INTO platform_sync_checkpoints
              (connection_id,stream,cursor,window_start,window_end,last_attempt_at,last_success_at)
@@ -294,16 +290,13 @@ async fn taobao_sync_rejects_stale_checkpoint_without_losing_raw_page(pool: PgPo
     let transport = CheckpointAdvancingTransport {
         pool: pool.clone(),
         connection_id,
-        response: page(
-            12,
-            "2026-09-27 15:50:00",
-            false,
-            None,
-            "10.00",
-            "0",
-        ),
+        response: page(12, "2026-09-27 15:50:00", false, None, "10.00", "0"),
     };
-    let sync = TaobaoOrderSync::new(pool.clone(), connection_id, TaobaoClient::new(signer(), transport));
+    let sync = TaobaoOrderSync::new(
+        pool.clone(),
+        connection_id,
+        TaobaoClient::new(signer(), transport),
+    );
 
     let error = sync
         .sync_next(at("2026-09-27T08:00:00Z"))
