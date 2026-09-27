@@ -53,7 +53,10 @@ pub fn normalize_alliance_message(
     Ok(batch)
 }
 
-pub fn normalize_reconcile_page(raw: &Value, received_at: DateTime<Utc>) -> Result<NormalizedBatch> {
+pub fn normalize_reconcile_page(
+    raw: &Value,
+    received_at: DateTime<Utc>,
+) -> Result<NormalizedBatch> {
     let data = raw.get("data").unwrap_or(raw);
     let list = find_array(data, &["order_list", "orders", "list", "order_infos"])
         .ok_or_else(|| PlatformError::invalid("抖店联盟对账响应缺少订单列表"))?;
@@ -139,10 +142,7 @@ fn normalize_record(
         Kind::Pay => "paid",
         Kind::Refund => {
             let lower = raw_status.to_ascii_lowercase();
-            if lower.contains("success")
-                || lower.contains("refund")
-                || lower == "3"
-                || lower == "5"
+            if lower.contains("success") || lower.contains("refund") || lower == "3" || lower == "5"
             {
                 "refunded"
             } else {
@@ -174,7 +174,12 @@ fn normalize_record(
     ))?;
     let paid_at = optional_time(first(
         record,
-        &["pay_time", "paid_time", "pay_success_time", "order_pay_time"],
+        &[
+            "pay_time",
+            "paid_time",
+            "pay_success_time",
+            "order_pay_time",
+        ],
     ))?;
     let completed_at = if matches!(kind, Kind::Settlement) {
         optional_time(first(record, &["settle_time", "settlement_time"]))?
@@ -204,55 +209,48 @@ fn normalize_record(
         normalized_payload: record.clone(),
     });
 
-    match kind {
-        Kind::Pay => normalize_commission(
-            record,
-            role,
-            &order_id,
-            "estimated",
-            "unfunded",
-            &raw_status,
+    let commission_state = match kind {
+        Kind::Pay => CommissionState {
+            phase: "estimated",
+            funding_phase: "unfunded",
+            raw_status: &raw_status,
             source_updated_at,
-            batch,
-        )?,
+        },
         Kind::Refund => {
             normalize_refund(record, role, message_id, received_at, batch)?;
-            normalize_commission(
-                record,
-                role,
-                &order_id,
-                "reversed",
-                "reversed",
-                &raw_status,
+            CommissionState {
+                phase: "reversed",
+                funding_phase: "reversed",
+                raw_status: &raw_status,
                 source_updated_at,
-                batch,
-            )?;
+            }
         }
         Kind::Settlement => {
             normalize_settlement(record, role, message_id, received_at, batch)?;
-            normalize_commission(
-                record,
-                role,
-                &order_id,
-                "settled",
-                "receivable",
-                &raw_status,
+            CommissionState {
+                phase: "settled",
+                funding_phase: "receivable",
+                raw_status: &raw_status,
                 source_updated_at,
-                batch,
-            )?;
+            }
         }
-    }
+    };
+    normalize_commission(record, role, &order_id, commission_state, batch)?;
     Ok(())
+}
+
+struct CommissionState<'a> {
+    phase: &'a str,
+    funding_phase: &'a str,
+    raw_status: &'a str,
+    source_updated_at: DateTime<Utc>,
 }
 
 fn normalize_commission(
     record: &Value,
     role: &str,
     order_id: &str,
-    phase: &str,
-    funding_phase: &str,
-    raw_status: &str,
-    source_updated_at: DateTime<Utc>,
+    state: CommissionState<'_>,
     batch: &mut NormalizedBatch,
 ) -> Result<()> {
     let beneficiary = beneficiary_id(record, role);
@@ -279,7 +277,11 @@ fn normalize_commission(
     let institution_share_minor = if role == "kol" {
         minor(first(
             record,
-            &["institution_commission", "inst_commission", "mcn_commission"],
+            &[
+                "institution_commission",
+                "inst_commission",
+                "mcn_commission",
+            ],
         ))?
     } else {
         None
@@ -302,16 +304,16 @@ fn normalize_commission(
         external_order_line_id: order_id.to_owned(),
         external_beneficiary_id: beneficiary,
         beneficiary_role: role.into(),
-        phase: phase.into(),
-        funding_phase: funding_phase.into(),
+        phase: state.phase.into(),
+        funding_phase: state.funding_phase.into(),
         currency: "CNY".into(),
         gross_minor,
         platform_service_fee_minor,
         special_service_fee_minor: None,
         institution_share_minor,
         net_minor,
-        raw_status: raw_status.into(),
-        source_updated_at,
+        raw_status: state.raw_status.into(),
+        source_updated_at: state.source_updated_at,
         metadata: json!({
             "pid": first_string(record, &["pid", "promotion_id", "position_id"]),
             "source": "douyin_alliance"
@@ -422,11 +424,8 @@ fn normalize_settlement(
     ))?
     .or_else(|| gross_minor.map(|gross| gross - fee_minor.unwrap_or_default()));
     batch.settlements.push(SettlementObservation {
-        external_settlement_id: first_string(
-            record,
-            &["settlement_id", "settle_id", "bill_id"],
-        )
-        .unwrap_or_else(|| format!("{order_id}:settlement:{message_id}")),
+        external_settlement_id: first_string(record, &["settlement_id", "settle_id", "bill_id"])
+            .unwrap_or_else(|| format!("{order_id}:settlement:{message_id}")),
         external_commission_key: Some(key),
         external_order_line_id: Some(order_id),
         currency: "CNY".into(),
@@ -483,7 +482,10 @@ fn required_id(value: &Value, names: &[&str], label: &str) -> Result<String> {
 
 fn beneficiary_id(record: &Value, role: &str) -> Option<String> {
     if role == "institution" {
-        first_string(record, &["institution_id", "inst_id", "mcn_id", "author_id"])
+        first_string(
+            record,
+            &["institution_id", "inst_id", "mcn_id", "author_id"],
+        )
     } else {
         first_string(record, &["author_id", "kol_id", "talent_id", "达人id"])
     }
@@ -529,7 +531,10 @@ fn optional_time(value: Option<&Value>) -> Result<Option<DateTime<Utc>>> {
 }
 
 fn time(value: Option<&Value>, fallback: DateTime<Utc>) -> Result<DateTime<Utc>> {
-    value.map(parse_time).transpose().map(|v| v.unwrap_or(fallback))
+    value
+        .map(parse_time)
+        .transpose()
+        .map(|v| v.unwrap_or(fallback))
 }
 
 fn parse_time(value: &Value) -> Result<DateTime<Utc>> {
@@ -539,7 +544,7 @@ fn parse_time(value: &Value) -> Result<DateTime<Utc>> {
                 .as_i64()
                 .or_else(|| number.as_u64().and_then(|v| i64::try_from(v).ok()))
                 .ok_or_else(|| PlatformError::invalid("抖音时间戳超出范围"))?;
-            let (seconds, nanos) = if raw.abs() >= 10_000_000_000 {
+            let (seconds, nanos) = if raw.unsigned_abs() >= 10_000_000_000 {
                 (raw / 1000, ((raw % 1000).unsigned_abs() as u32) * 1_000_000)
             } else {
                 (raw, 0)
@@ -556,8 +561,8 @@ fn parse_time(value: &Value) -> Result<DateTime<Utc>> {
             }
             let naive = NaiveDateTime::parse_from_str(raw, "%Y-%m-%d %H:%M:%S")
                 .map_err(|_| PlatformError::invalid(format!("无效抖音时间：{raw}")))?;
-            let china =
-                FixedOffset::east_opt(8 * 3600).ok_or_else(|| PlatformError::invalid("无效时区"))?;
+            let china = FixedOffset::east_opt(8 * 3600)
+                .ok_or_else(|| PlatformError::invalid("无效时区"))?;
             china
                 .from_local_datetime(&naive)
                 .single()

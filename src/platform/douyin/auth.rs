@@ -130,15 +130,6 @@ impl DouyinMessageVerifier {
         }
         Ok(())
     }
-
-    #[cfg(test)]
-    pub(crate) fn sign_for_test(&self, body: &[u8]) -> String {
-        let mut hasher = Md5::new();
-        hasher.update(self.app_key.as_bytes());
-        hasher.update(body);
-        hasher.update(self.app_secret.as_bytes());
-        hex::encode(hasher.finalize())
-    }
 }
 
 fn canonical_json(value: &Value) -> Result<String> {
