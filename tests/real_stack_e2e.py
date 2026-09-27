@@ -119,20 +119,6 @@ captured = post(
 )
 order_id = captured["order"]["id"]
 post(f"/orders/{order_id}/release", ADMIN, {}, "e2e-release-order-v1")
-payout = post(
-    "/payouts",
-    ADMIN,
-    {
-        "external_id": "e2e-payout-001",
-        "account_id": merchant_id,
-        "amount_minor": "500",
-        "destination_ref": "verified-e2e-payee",
-    },
-    "e2e-request-payout-v1",
-)
-payout_id = payout["id"]
-
-
 with sync_playwright() as playwright:
     executable = (
         os.environ.get("CONSOLE_BROWSER")
@@ -170,6 +156,34 @@ with sync_playwright() as playwright:
     refund.get_by_role("button", name="完成并刷新订单", exact=True).click()
     expect(page.get_by_text("e2e-refund-001", exact=True)).to_be_visible()
     page.screenshot(path=str(OUT / "real-order-refund.png"), full_page=True)
+
+    # Admin: create a real payout through the dedicated request workflow.
+    page.locator("nav").get_by_role("button", name="提现结算", exact=True).click()
+    request_payout = page.locator(".payout-request")
+    expect(request_payout.get_by_role("heading", name="申请提现", exact=True)).to_be_visible()
+    request_payout.locator("input").nth(0).fill("e2e-payout-001")
+    request_payout.locator("input").nth(1).fill(merchant_id)
+    request_payout.locator("input").nth(2).fill("5.00")
+    request_payout.locator("input").nth(3).fill("verified-e2e-payee")
+    request_payout.get_by_role("button", name="校验提现申请", exact=True).click()
+    request_payout.locator("input[type=checkbox]").check()
+    request_payout.get_by_role("button", name="确认申请提现", exact=True).click()
+    expect(
+        request_payout.get_by_role("button", name="完成并刷新提现列表", exact=True)
+    ).to_be_visible()
+    request_payout.get_by_role("button", name="完成并刷新提现列表", exact=True).click()
+    expect(page.get_by_text("e2e-payout-001", exact=True)).to_be_visible()
+    page.screenshot(path=str(OUT / "real-payout-requested.png"), full_page=True)
+
+    payout_page = api("GET", "/payouts?limit=50&offset=0", ADMIN)
+    payout = next(
+        item for item in payout_page["items"] if item["external_id"] == "e2e-payout-001"
+    )
+    payout_id = payout["id"]
+    assert payout["amount_minor"] == "500", payout
+    assert payout["account_id"] == merchant_id, payout
+    assert payout["destination_ref"] == "verified-e2e-payee", payout
+    assert payout["status"] == "requested", payout
 
     page.get_by_role("button", name="退出并清除会话").click()
     expect(page.get_by_role("button", name="安全登录")).to_be_visible()
@@ -223,6 +237,8 @@ result = {
         "real order list/detail",
         "real refund posting and ledger transaction",
         "refund state persisted in PostgreSQL",
+        "real dedicated payout request through the UI",
+        "payout request persisted in PostgreSQL with exact account/amount/destination",
         "real finance authentication",
         "real payout list/detail",
         "real payout approval state transition",
