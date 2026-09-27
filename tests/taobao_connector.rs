@@ -37,11 +37,7 @@ impl FixtureTransport {
 
 #[async_trait]
 impl TaobaoTransport for FixtureTransport {
-    async fn execute(
-        &self,
-        _endpoint: &str,
-        params: &BTreeMap<String, String>,
-    ) -> Result<Value> {
+    async fn execute(&self, _endpoint: &str, params: &BTreeMap<String, String>) -> Result<Value> {
         self.requests.lock().unwrap().push(params.clone());
         self.pages
             .lock()
@@ -58,9 +54,7 @@ fn at(value: &str) -> DateTime<Utc> {
 }
 
 fn signer() -> TaobaoSigner {
-    TaobaoSigner::new(
-        TaobaoCredentials::new("test-app", "test-secret", "test-session").unwrap(),
-    )
+    TaobaoSigner::new(TaobaoCredentials::new("test-app", "test-secret", "test-session").unwrap())
 }
 
 #[test]
@@ -144,7 +138,14 @@ async fn taobao_sync_resumes_cursor_projects_latest_state_and_never_posts_ledger
     .unwrap();
 
     let transport = FixtureTransport::with_pages(vec![
-        page(12, "2026-09-27 15:50:00", true, Some("cursor-2"), "10.00", "0"),
+        page(
+            12,
+            "2026-09-27 15:50:00",
+            true,
+            Some("cursor-2"),
+            "10.00",
+            "0",
+        ),
         page(3, "2026-09-27 15:55:00", false, None, "10.00", "9.00"),
     ]);
     let client = TaobaoClient::new(signer(), transport.clone());
@@ -181,13 +182,12 @@ async fn taobao_sync_resumes_cursor_projects_latest_state_and_never_posts_ledger
     assert_eq!(requests[0]["start_time"], requests[1]["start_time"]);
     assert_eq!(requests[0]["end_time"], requests[1]["end_time"]);
 
-    let raw_count: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM platform_raw_events WHERE connection_id=$1",
-    )
-    .bind(connection_id)
-    .fetch_one(&pool)
-    .await
-    .unwrap();
+    let raw_count: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM platform_raw_events WHERE connection_id=$1")
+            .bind(connection_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
     assert_eq!(raw_count, 2);
 
     let order_observations: i64 = sqlx::query_scalar(
@@ -213,17 +213,16 @@ async fn taobao_sync_resumes_cursor_projects_latest_state_and_never_posts_ledger
         ("completed".into(), "3".into(), Some(10_000), Some(8_000))
     );
 
-    let commission: (String, String, Option<i64>, Option<i64>, Option<i64>) =
-        sqlx::query_as(
-            "SELECT phase,funding_phase,gross_minor,platform_service_fee_minor,net_minor
+    let commission: (String, String, Option<i64>, Option<i64>, Option<i64>) = sqlx::query_as(
+        "SELECT phase,funding_phase,gross_minor,platform_service_fee_minor,net_minor
              FROM external_commissions
              WHERE connection_id=$1
                AND external_commission_key='TB-SUB-001:publisher:98836808'",
-        )
-        .bind(connection_id)
-        .fetch_one(&pool)
-        .await
-        .unwrap();
+    )
+    .bind(connection_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
     assert_eq!(
         commission,
         (
