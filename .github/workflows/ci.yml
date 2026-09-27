@@ -204,6 +204,44 @@ jobs:
           path: target/tauri-lifecycle-e2e
           if-no-files-found: error
 
+  tauri-lifecycle-windows:
+    needs: web
+    runs-on: windows-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: tauri-lifecycle-windows
+      - uses: actions/download-artifact@v4
+        with:
+          name: commission-console-tauri-assets
+          path: apps/console/dist-tauri
+      - name: Build real Tauri desktop binary
+        run: cargo build --locked -p commission-shell --features custom-protocol
+      - name: Install pinned Tauri WebDriver bridge
+        run: cargo install tauri-driver --locked --version 2.0.6
+      - name: Install matching Microsoft Edge Driver
+        shell: pwsh
+        run: |
+          cargo install --git https://github.com/chippers/msedgedriver-tool --rev 8c4b34f51b45f5cf08013366d703de464ab871d1 --locked
+          & "$HOME/.cargo/bin/msedgedriver-tool.exe"
+          $driver = (Resolve-Path "./msedgedriver.exe").Path
+          "TAURI_NATIVE_DRIVER=$driver" >> $env:GITHUB_ENV
+          Write-Host "Using EdgeDriver at $driver"
+      - name: Hard-kill and restart recovery E2E on WebView2
+        shell: pwsh
+        env:
+          TAURI_LIFECYCLE_OUTPUT: target/tauri-lifecycle-windows
+        run: python tests/tauri_lifecycle_e2e.py target/debug/commission-shell.exe
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: tauri-lifecycle-windows
+          path: target/tauri-lifecycle-windows
+          if-no-files-found: error
+
   desktop:
     needs: web
     strategy:
