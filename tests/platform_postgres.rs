@@ -76,13 +76,13 @@ async fn raw_events_are_idempotent_and_payload_is_immutable(pool: PgPool) {
     .await;
     assert!(duplicate_fallback.is_err());
 
-    assert!(
-        sqlx::query(r#"UPDATE platform_raw_events SET payload='{"tampered":true}' WHERE id=$1"#)
-            .bind(first)
-            .execute(&pool)
-            .await
-            .is_err()
-    );
+    assert!(sqlx::query(
+        r#"UPDATE platform_raw_events SET payload='{"tampered":true}' WHERE id=$1"#
+    )
+    .bind(first)
+    .execute(&pool)
+    .await
+    .is_err());
 
     sqlx::query(
         "UPDATE platform_raw_events
