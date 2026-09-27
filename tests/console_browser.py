@@ -260,8 +260,19 @@ with sync_playwright() as p:
     page.get_by_role("button", name="退出并清除会话").click()
     expect(page.get_by_role("button", name="安全登录")).to_be_visible()
 
+    # A malformed/unbound member must not fall back to an editable account field.
+    actor["account_id"] = None
+    page.locator("input[type=password]").fill("unbound-member-ui-fixture")
+    page.get_by_role("button", name="安全登录").click()
+    expect(page.get_by_text("测试成员", exact=True)).to_be_visible()
+    page.locator("nav").get_by_role("button", name="提现结算", exact=True).click()
+    expect(page.locator(".payout-request")).to_have_count(0)
+    expect(page.locator("section.operations")).to_have_count(0)
+    page.get_by_role("button", name="退出并清除会话").click()
+    expect(page.get_by_role("button", name="安全登录")).to_be_visible()
+
     assert not errors, errors
-    result = {"tested_ref": os.environ.get("GITHUB_SHA", "local"), "mode": "Chromium, release WASM, mocked API (not backend E2E)", "checks": ["CSP load", "login/logout", "no browser token persistence", "13 data views", "dedicated order detail", "dedicated refund confirmation and same-key retry", "dedicated payout request and same-key retry", "member payout account lock", "dedicated payout detail and same-key approval retry", "generic payout request removed", "pagination advances and reverses offset", "no template expression leakage", "server quote payload", "escaped text", "prepare locks payload", "explicit confirmation", "503 preserves request and prevents logout", "same-key same-body retry", "browser reload restores original pending write without persisting token", "390px responsive width"], "requests": len(requests), "writes": len(writes), "page_errors": errors}
+    result = {"tested_ref": os.environ.get("GITHUB_SHA", "local"), "mode": "Chromium, release WASM, mocked API (not backend E2E)", "checks": ["CSP load", "login/logout", "no browser token persistence", "13 data views", "dedicated order detail", "dedicated refund confirmation and same-key retry", "dedicated payout request and same-key retry", "member payout account lock", "unbound member has no editable payout fallback", "dedicated payout detail and same-key approval retry", "generic payout request removed", "pagination advances and reverses offset", "no template expression leakage", "server quote payload", "escaped text", "prepare locks payload", "explicit confirmation", "503 preserves request and prevents logout", "same-key same-body retry", "browser reload restores original pending write without persisting token", "390px responsive width"], "requests": len(requests), "writes": len(writes), "page_errors": errors}
     (OUT / "result.json").write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
     print(json.dumps(result, ensure_ascii=False, indent=2))
     browser.close()
