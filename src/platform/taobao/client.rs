@@ -5,7 +5,7 @@ use crate::platform::{
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use serde_json::Value;
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, time::Duration};
 
 use super::{auth::TaobaoOrderQuery, TaobaoSigner, DEFAULT_ENDPOINT};
 
@@ -30,18 +30,15 @@ impl Default for ReqwestTaobaoTransport {
 #[async_trait]
 impl TaobaoTransport for ReqwestTaobaoTransport {
     async fn execute(&self, endpoint: &str, params: &BTreeMap<String, String>) -> Result<Value> {
-        let response = self
-            .client
-            .get(endpoint)
-            .query(params)
-            .send()
-            .await
-            .map_err(|e| PlatformError::Transport(e.to_string()))?;
-        let status = response.status();
-        let body = response
-            .text()
-            .await
-            .map_err(|e| PlatformError::Transport(e.to_string()))?;
+        let (status, body) = tokio::time::timeout(Duration::from_secs(15), async {
+            let response = self.client.get(endpoint).query(params).send().await?;
+            let status = response.status();
+            let body = response.text().await?;
+            Ok::<_, reqwest::Error>((status, body))
+        })
+        .await
+        .map_err(|_| PlatformError::Transport("淘宝 HTTP 请求超时".into()))?
+        .map_err(|e| PlatformError::Transport(e.to_string()))?;
         if !status.is_success() {
             return Err(PlatformError::Transport(format!(
                 "淘宝 HTTP {}",
