@@ -96,6 +96,9 @@ fn Shell(session: Session, auth: Auth) -> impl IntoView {
     }
     let is_member = session.actor.role == "member";
     let can_refund = Operation::Refund.allowed(&session.actor);
+    let payout_account = session.actor.account_id;
+    let can_request_payout =
+        Operation::RequestPayout.allowed(&session.actor) && (!is_member || payout_account.is_some());
     let can_manage_payout = Operation::ApprovePayout.allowed(&session.actor);
     let links = RESOURCES.iter().filter(|(r, _)| !is_member || ["dashboard", "accounts", "commissions", "wallets", "payouts", "ledger"].contains(r))
         .map(|&(resource, title)| view! {
@@ -145,6 +148,8 @@ fn Shell(session: Session, auth: Auth) -> impl IntoView {
                     <crate::payouts::PayoutsPanel
                         client
                         phase
+                        can_request=can_request_payout
+                        fixed_account=payout_account
                         can_manage=can_manage_payout
                     />
                 }.into_any(),
@@ -366,7 +371,8 @@ fn Operations(client: ClientStore, actor: Actor, phase: RwSignal<WritePhase>) ->
             op.allowed(&actor)
                 && !matches!(
                     op,
-                    Operation::ApprovePayout
+                    Operation::RequestPayout
+                        | Operation::ApprovePayout
                         | Operation::ProcessPayout
                         | Operation::RejectPayout
                         | Operation::PayoutOutcome
@@ -374,7 +380,7 @@ fn Operations(client: ClientStore, actor: Actor, phase: RwSignal<WritePhase>) ->
         })
         .collect();
     let Some(first) = allowed.first().copied() else {
-        return view! { <p>"当前身份无写入权限"</p> }.into_any();
+        return ().into_any();
     };
     let operation = RwSignal::new(first);
     let body = RwSignal::new(first.example().to_owned());

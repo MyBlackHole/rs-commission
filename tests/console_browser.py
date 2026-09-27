@@ -74,6 +74,8 @@ def api(route):
         write_attempts[path] = write_attempts.get(path, 0) + 1
         if write_attempts[path] == 1:
             status, data = 503, {"error": {"code": "retryable", "message": "测试：结果未知"}}
+        elif path == "payouts":
+            data = {"id": payout_id, "external_id": "payout-request-002", "account_id": uid, "amount_minor": "1250", "destination_ref": "verified-payee-002", "status": "requested"}
         elif path.endswith("/refunds"):
             data = {"id": uid, "external_id": "refund-002", "amount_minor": "1000", "cumulative_minor": "3500"}
         elif path.endswith("/approve"):
@@ -149,8 +151,35 @@ with sync_playwright() as p:
     refund.get_by_role("button", name="完成并刷新订单", exact=True).click()
     expect(page.locator("nav").get_by_role("button", name="业务总览", exact=True)).to_be_enabled()
 
-    # Dedicated payout detail and approval workflow.
+    # Dedicated payout request workflow, separate from the generic JSON console.
     page.locator("nav").get_by_role("button", name="提现结算", exact=True).click()
+    request_payout = page.locator(".payout-request")
+    expect(request_payout.get_by_role("heading", name="申请提现", exact=True)).to_be_visible()
+    request_payout.locator("input").nth(0).fill("payout-request-002")
+    request_payout.locator("input").nth(1).fill(uid)
+    request_payout.locator("input").nth(2).fill("12.50")
+    request_payout.locator("input").nth(3).fill("verified-payee-002")
+    request_payout.get_by_role("button", name="校验提现申请", exact=True).click()
+    expect(page.locator("nav").get_by_role("button", name="业务总览", exact=True)).to_be_disabled()
+    request_payout.locator("input[type=checkbox]").check()
+    request_payout.get_by_role("button", name="确认申请提现", exact=True).click()
+    expect(request_payout.get_by_role("button", name="以原幂等键重试", exact=True)).to_be_visible()
+    expect(page.get_by_role("button", name="退出并清除会话")).to_be_disabled()
+    request_payout.get_by_role("button", name="以原幂等键重试", exact=True).click()
+    expect(request_payout.get_by_role("button", name="完成并刷新提现列表", exact=True)).to_be_visible()
+    request_pair = [w for w in writes if w["url"].endswith("/api/v1/payouts")]
+    assert len(request_pair) == 2 and request_pair[0]["key"] and request_pair[0] == request_pair[1]
+    request_body = json.loads(request_pair[0]["body"])
+    assert request_body == {
+        "external_id": "payout-request-002",
+        "account_id": uid,
+        "amount_minor": "1250",
+        "destination_ref": "verified-payee-002",
+    }
+    request_payout.get_by_role("button", name="完成并刷新提现列表", exact=True).click()
+    expect(page.locator("nav").get_by_role("button", name="业务总览", exact=True)).to_be_enabled()
+
+    # Dedicated payout detail and approval workflow.
     expect(page.get_by_role("button", name="查看详情", exact=True)).to_be_visible()
     page.get_by_role("button", name="查看详情", exact=True).click()
     expect(page.get_by_role("heading", name="提现详情", exact=True)).to_be_visible()
@@ -174,6 +203,7 @@ with sync_playwright() as p:
     page.get_by_role("button", name="向服务器试算").click()
     expect(panel.locator("pre")).to_contain_text("binding")
     op = page.locator("section.operations")
+    expect(op.locator("option", has_text="申请提现")).to_have_count(0)
     op.get_by_role("button", name="校验并准备请求").click()
     expect(op.locator("textarea")).to_be_disabled()
     expect(op.get_by_role("button", name="确认提交", exact=True)).to_be_disabled()
@@ -213,8 +243,25 @@ with sync_playwright() as p:
     page.get_by_role("button", name="退出并清除会话").click()
     expect(page.get_by_role("button", name="安全登录")).to_be_visible()
     assert page.locator("input[type=password]").input_value() == ""
+
+    # Member sees the dedicated payout request with the bound account locked.
+    actor["role"] = "member"
+    actor["name"] = "测试成员"
+    actor["account_id"] = uid
+    page.locator("input[type=password]").fill("member-ui-fixture")
+    page.get_by_role("button", name="安全登录").click()
+    expect(page.get_by_text("测试成员", exact=True)).to_be_visible()
+    page.locator("nav").get_by_role("button", name="提现结算", exact=True).click()
+    member_request = page.locator(".payout-request")
+    member_account = member_request.locator("input").nth(1)
+    expect(member_account).to_be_disabled()
+    expect(member_account).to_have_value(uid)
+    expect(page.locator("section.operations")).to_have_count(0)
+    page.get_by_role("button", name="退出并清除会话").click()
+    expect(page.get_by_role("button", name="安全登录")).to_be_visible()
+
     assert not errors, errors
-    result = {"tested_ref": os.environ.get("GITHUB_SHA", "local"), "mode": "Chromium, release WASM, mocked API (not backend E2E)", "checks": ["CSP load", "login/logout", "no browser token persistence", "13 data views", "dedicated order detail", "dedicated refund confirmation and same-key retry", "dedicated payout detail and same-key approval retry", "pagination advances and reverses offset", "no template expression leakage", "server quote payload", "escaped text", "prepare locks payload", "explicit confirmation", "503 preserves request and prevents logout", "same-key same-body retry", "browser reload restores original pending write without persisting token", "390px responsive width"], "requests": len(requests), "writes": len(writes), "page_errors": errors}
+    result = {"tested_ref": os.environ.get("GITHUB_SHA", "local"), "mode": "Chromium, release WASM, mocked API (not backend E2E)", "checks": ["CSP load", "login/logout", "no browser token persistence", "13 data views", "dedicated order detail", "dedicated refund confirmation and same-key retry", "dedicated payout request and same-key retry", "member payout account lock", "dedicated payout detail and same-key approval retry", "generic payout request removed", "pagination advances and reverses offset", "no template expression leakage", "server quote payload", "escaped text", "prepare locks payload", "explicit confirmation", "503 preserves request and prevents logout", "same-key same-body retry", "browser reload restores original pending write without persisting token", "390px responsive width"], "requests": len(requests), "writes": len(writes), "page_errors": errors}
     (OUT / "result.json").write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
     print(json.dumps(result, ensure_ascii=False, indent=2))
     browser.close()
