@@ -250,7 +250,7 @@ with sync_playwright() as p:
     ).to_have_text("¥ 10.00")
     for index in range(4):
         expect(capture.locator("input").nth(index)).to_be_disabled()
-    capture.locator(".capture-box input").fill("order-capture-002")
+    capture.get_by_role("textbox", name="订单业务号").fill("order-capture-002")
     capture.get_by_role("button", name="校验订单入账请求", exact=True).click()
     capture.locator(".capture-box input[type=checkbox]").check()
     capture.get_by_role("button", name="确认订单入账", exact=True).click()
