@@ -97,8 +97,8 @@ fn Shell(session: Session, auth: Auth) -> impl IntoView {
     let is_member = session.actor.role == "member";
     let can_refund = Operation::Refund.allowed(&session.actor);
     let payout_account = session.actor.account_id;
-    let can_request_payout =
-        Operation::RequestPayout.allowed(&session.actor) && (!is_member || payout_account.is_some());
+    let can_request_payout = Operation::RequestPayout.allowed(&session.actor)
+        && (!is_member || payout_account.is_some());
     let can_manage_payout = Operation::ApprovePayout.allowed(&session.actor);
     let links = RESOURCES.iter().filter(|(r, _)| !is_member || ["dashboard", "accounts", "commissions", "wallets", "payouts", "ledger"].contains(r))
         .map(|&(resource, title)| view! {
