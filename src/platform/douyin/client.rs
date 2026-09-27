@@ -105,7 +105,10 @@ impl<T: DouyinTransport> DouyinClient<T> {
             .execute(&self.endpoint, path, &common, &body)
             .await?;
 
-        let code = raw.get("code").and_then(Value::as_i64).unwrap_or(10000);
+        let code = raw
+            .get("code")
+            .and_then(Value::as_i64)
+            .ok_or_else(|| PlatformError::Remote("抖店响应缺少 code".into()))?;
         if code != 10000 {
             let message = raw
                 .get("sub_msg")
