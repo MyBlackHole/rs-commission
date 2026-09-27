@@ -90,7 +90,7 @@ try:
         panel = page.locator("section.panel").first
         panel.locator("input").nth(0).fill("11111111-1111-4111-8111-111111111111")
         page.get_by_role("button", name="向服务器试算").click()
-        expect(panel.locator("pre")).to_contain_text("binding")
+        expect(panel.locator("details pre")).to_contain_text("binding")
         op = page.locator("section.operations")
         assert op.locator("option", has_text="登记已支付订单").count() == 0
         op.get_by_role("button", name="校验并准备请求").click()
