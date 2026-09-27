@@ -184,7 +184,7 @@ fn money(value: Option<&str>) -> Result<Option<i64>> {
         .map(Money::from_yuan)
         .transpose()
         .map(|v| v.map(|money| money.0))
-        .map_err(Into::into)
+        .map_err(PlatformError::invalid)
 }
 
 fn parse_time(value: &str) -> Result<DateTime<Utc>> {
