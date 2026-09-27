@@ -4,7 +4,7 @@ use crate::{
     platform::{self, Client, Recovery, Write},
 };
 use commission_client::{bridge::WritePhase, Operation, RESOURCES};
-use commission_types::{Actor, Money, QuoteInput};
+use commission_types::{Actor, CaptureOrder, Money, QuoteInput};
 use leptos::{prelude::*, reactive::owner::LocalStorage};
 use serde_json::Value;
 use uuid::Uuid;
@@ -14,6 +14,11 @@ use wasm_bindgen_futures::spawn_local;
 struct Session {
     client: Client,
     actor: Actor,
+}
+#[derive(Clone)]
+struct QuotedOrder {
+    input: QuoteInput,
+    quote: Value,
 }
 type Auth = RwSignal<Option<Session>, LocalStorage>;
 pub(crate) type ClientStore = StoredValue<Client, LocalStorage>;
@@ -95,6 +100,7 @@ fn Shell(session: Session, auth: Auth) -> impl IntoView {
         });
     }
     let is_member = session.actor.role == "member";
+    let can_capture = Operation::CaptureOrder.allowed(&session.actor);
     let can_refund = Operation::Refund.allowed(&session.actor);
     let payout_account = session.actor.account_id;
     let can_request_payout = Operation::RequestPayout.allowed(&session.actor)
@@ -136,7 +142,17 @@ fn Shell(session: Session, auth: Auth) -> impl IntoView {
                 <RecoveryPanel client phase recovery/>
             })}
             {move || match view.get().as_str() {
-                "quote" => view! { <QuotePanel client/> }.into_any(),
+                "quote" => view! {
+                    <QuotePanel
+                        client
+                        phase
+                        can_capture
+                        on_captured=Callback::new(move |_| {
+                            offset.set(0);
+                            view.set("orders".into());
+                        })
+                    />
+                }.into_any(),
                 "orders" => view! {
                     <crate::orders::OrdersPanel
                         client
@@ -323,42 +339,296 @@ fn DataView(value: Value) -> impl IntoView {
 }
 
 #[component]
-fn QuotePanel(client: ClientStore) -> impl IntoView {
+fn QuotePanel(
+    client: ClientStore,
+    phase: RwSignal<WritePhase>,
+    can_capture: bool,
+    on_captured: Callback<()>,
+) -> impl IntoView {
     let merchant = RwSignal::new(String::new());
     let customer = RwSignal::new(String::new());
     let paid = RwSignal::new("100.00".to_owned());
     let base = RwSignal::new("100.00".to_owned());
     let busy = RwSignal::new(false);
-    let output = RwSignal::new(String::new());
+    let quoted = RwSignal::new_local(None::<QuotedOrder>);
+    let quote_message = RwSignal::new(String::new());
+    let external_id = RwSignal::new(String::new());
+    let confirmed = RwSignal::new(false);
+    let pending = RwSignal::new_local(None::<Write>);
+    let capture_message = RwSignal::new(String::new());
+
     view! {
-        <section class="panel"><h2>"佣金试算"</h2><p class="muted">"仅查询服务器规则，不入账。金额单位：元。"</p>
+        <section class="panel order-capture">
+            <div class="section-head"><div>
+                <h2>"佣金试算 / 订单入账"</h2>
+                <p class="muted">"先用服务器当前规则试算；试算不写账也不锁定规则。具备订单接入权限时，可使用同一组冻结输入继续登记已支付订单。"</p>
+            </div></div>
             <form on:submit=move |e| {
-                e.prevent_default(); if busy.get_untracked() { return; }
+                e.prevent_default();
+                if busy.get_untracked()
+                    || phase.get_untracked() != WritePhase::Editing
+                    || quoted.get_untracked().is_some()
+                {
+                    return;
+                }
                 let input = (|| -> std::result::Result<QuoteInput, String> {
+                    let paid_minor = Money::from_yuan(&paid.get_untracked()).map_err(str::to_owned)?;
+                    let commission_base_minor = Money::from_yuan(&base.get_untracked()).map_err(str::to_owned)?;
+                    if paid_minor.0 <= 0 {
+                        return Err("实付金额必须大于 0".into());
+                    }
+                    if commission_base_minor.0 < 0 || commission_base_minor > paid_minor {
+                        return Err("计佣基数必须在 0 与实付金额之间".into());
+                    }
                     Ok(QuoteInput {
                         merchant_id: merchant.get_untracked().parse::<Uuid>().map_err(|_| "商家 UUID 无效")?,
-                        customer_external_id: if customer.get_untracked().is_empty() { None } else { Some(customer.get_untracked()) },
-                        paid_minor: Money::from_yuan(&paid.get_untracked()).map_err(str::to_owned)?,
-                        commission_base_minor: Money::from_yuan(&base.get_untracked()).map_err(str::to_owned)?,
+                        customer_external_id: {
+                            let value = customer.get_untracked();
+                            if value.trim().is_empty() { None } else { Some(value.trim().to_owned()) }
+                        },
+                        paid_minor,
+                        commission_base_minor,
                     })
                 })();
-                let input = match input { Ok(v) => v, Err(e) => { output.set(e); return; } };
-                busy.set(true); let client = client.get_value();
+                let input = match input {
+                    Ok(value) => value,
+                    Err(error) => {
+                        quote_message.set(error);
+                        return;
+                    }
+                };
+                busy.set(true);
+                quote_message.set(String::new());
+                let client = client.get_value();
                 spawn_local(async move {
                     let result = client.quote(&input).await;
-                    if output.is_disposed() { return; }
-                    output.set(match result { Ok(v) => serde_json::to_string_pretty(&v).unwrap_or_default(), Err(e) => e.to_string() });
+                    if busy.is_disposed() { return; }
                     busy.set(false);
+                    match result {
+                        Ok(value) => {
+                            quoted.set(Some(QuotedOrder { input, quote: value }));
+                            external_id.set(String::new());
+                            confirmed.set(false);
+                            capture_message.set(String::new());
+                        }
+                        Err(error) => quote_message.set(error.to_string()),
+                    }
                 });
             }>
                 <div class="form-grid">
-                    <label>"商家 UUID"<input prop:value=move || merchant.get() on:input=move |e| merchant.set(event_target_value(&e)) required/></label>
-                    <label>"客户业务编号（可选）"<input prop:value=move || customer.get() on:input=move |e| customer.set(event_target_value(&e))/></label>
-                    <label>"实付金额（元）"<input prop:value=move || paid.get() on:input=move |e| paid.set(event_target_value(&e)) inputmode="decimal"/></label>
-                    <label>"计佣基数（元）"<input prop:value=move || base.get() on:input=move |e| base.set(event_target_value(&e)) inputmode="decimal"/></label>
+                    <label>"商家 UUID"<input
+                        disabled=move || busy.get() || phase.get() != WritePhase::Editing || quoted.get().is_some()
+                        prop:value=move || merchant.get()
+                        on:input=move |e| merchant.set(event_target_value(&e))
+                        required/></label>
+                    <label>"客户业务编号（可选）"<input
+                        disabled=move || busy.get() || phase.get() != WritePhase::Editing || quoted.get().is_some()
+                        prop:value=move || customer.get()
+                        on:input=move |e| customer.set(event_target_value(&e))/></label>
+                    <label>"实付金额（元）"<input
+                        disabled=move || busy.get() || phase.get() != WritePhase::Editing || quoted.get().is_some()
+                        prop:value=move || paid.get()
+                        on:input=move |e| paid.set(event_target_value(&e))
+                        inputmode="decimal"/></label>
+                    <label>"计佣基数（元）"<input
+                        disabled=move || busy.get() || phase.get() != WritePhase::Editing || quoted.get().is_some()
+                        prop:value=move || base.get()
+                        on:input=move |e| base.set(event_target_value(&e))
+                        inputmode="decimal"/></label>
                 </div>
-                <button type="submit" disabled=move || busy.get()>"向服务器试算"</button>
-            </form><pre role="status">{move || output.get()}</pre>
+                <button type="submit"
+                    hidden=move || quoted.get().is_some()
+                    disabled=move || busy.get() || phase.get() != WritePhase::Editing>
+                    {move || if busy.get() { "试算中…" } else { "向服务器试算" }}
+                </button>
+            </form>
+            <p class="error" role="alert">{move || quote_message.get()}</p>
+
+            {move || quoted.get().map(|draft| {
+                let quote = draft.quote.clone();
+                let cards = [
+                    ("佣金池", display("fee_pool_minor", &quote["split"]["fee_pool_minor"])),
+                    ("商家净额", display("merchant_minor", &quote["split"]["merchant_minor"])),
+                    ("平台净额", display("platform_minor", &quote["split"]["platform_minor"])),
+                    ("一级返佣", display("direct_minor", &quote["split"]["direct_minor"])),
+                    ("二级返佣", display("indirect_minor", &quote["split"]["indirect_minor"])),
+                ].into_iter().map(|(name, value)| view! {
+                    <article class="metric"><span>{name}</span><strong>{value}</strong></article>
+                }).collect_view();
+                let rule_name = quote["rule"]["name"].as_str().unwrap_or("未命名规则").to_owned();
+                let rule_version = quote["rule"]["version"].as_i64().unwrap_or_default();
+                view! {
+                    <div class="quote-result">
+                        <div class="section-head"><div>
+                            <h3>"试算结果"</h3>
+                            <p class="muted">{format!("匹配规则：{rule_name} · 版本 {rule_version}")}</p>
+                        </div>
+                        <button class="secondary"
+                            hidden=move || phase.get() != WritePhase::Editing || pending.get().is_some()
+                            on:click=move |_| {
+                                quoted.set(None);
+                                external_id.set(String::new());
+                                confirmed.set(false);
+                                quote_message.set(String::new());
+                                capture_message.set(String::new());
+                            }>"修改试算参数"</button></div>
+                        <div class="metrics quote-summary">{cards}</div>
+                        <p class="notice">"试算只反映当前规则，不锁定费率。真正订单入账会在服务器事务中重新匹配有效规则，最终账本与订单快照以入账结果为准。"</p>
+                        <details><summary>"查看完整试算结果"</summary><pre>{serde_json::to_string_pretty(&quote).unwrap_or_default()}</pre></details>
+
+                        {if can_capture {
+                            view! {
+                                <div class="capture-box">
+                                    <h3>"登记已支付订单"</h3>
+                                    <p class="muted">"仅在可信上游已经确认支付成功后登记。币种固定为 CNY；商家、客户、实付和计佣基数沿用上方已冻结试算输入。"</p>
+                                    <label>"订单业务号"<input
+                                        disabled=move || phase.get() != WritePhase::Editing
+                                        prop:value=move || external_id.get()
+                                        on:input=move |e| external_id.set(event_target_value(&e))
+                                        autocomplete="off" placeholder="例如 order-20260927-001"/></label>
+                                    <button hidden=move || phase.get() != WritePhase::Editing
+                                        on:click=move |_| {
+                                            if phase.get_untracked() != WritePhase::Editing { return; }
+                                            let business_id = external_id.get_untracked();
+                                            if business_id.trim().is_empty() {
+                                                capture_message.set("订单业务号不能为空".into());
+                                                return;
+                                            }
+                                            let Some(frozen) = quoted.get_untracked() else {
+                                                capture_message.set("请先完成服务器试算".into());
+                                                return;
+                                            };
+                                            let body = match serde_json::to_string(&CaptureOrder {
+                                                external_id: business_id.trim().to_owned(),
+                                                currency: "CNY".into(),
+                                                merchant_id: frozen.input.merchant_id,
+                                                customer_external_id: frozen.input.customer_external_id.clone(),
+                                                paid_minor: frozen.input.paid_minor,
+                                                commission_base_minor: frozen.input.commission_base_minor,
+                                            }) {
+                                                Ok(body) => body,
+                                                Err(_) => {
+                                                    capture_message.set("无法编码订单请求".into());
+                                                    return;
+                                                }
+                                            };
+                                            capture_message.set(String::new());
+                                            phase.set(WritePhase::Preparing);
+                                            let client = client.get_value();
+                                            spawn_local(async move {
+                                                match client.prepare(Operation::CaptureOrder, None, &body).await {
+                                                    Ok(write) => {
+                                                        pending.set(Some(write));
+                                                        confirmed.set(false);
+                                                        phase.set(WritePhase::Prepared);
+                                                    }
+                                                    Err(error) => {
+                                                        phase.set(WritePhase::Editing);
+                                                        capture_message.set(error.to_string());
+                                                    }
+                                                }
+                                            });
+                                        }>"校验订单入账请求"</button>
+                                    <div hidden=move || pending.get().is_none()>
+                                        <pre class="request-info">{move || pending.get().map(|write| format!(
+                                            "POST /api/v1/{}\nIdempotency-Key: {}",
+                                            write.path(),
+                                            write.key()
+                                        )).unwrap_or_default()}</pre>
+                                        <label class="confirm"><input type="checkbox"
+                                            prop:checked=move || confirmed.get()
+                                            disabled=move || phase.get() == WritePhase::Sending
+                                            on:change=move |e| confirmed.set(event_target_checked(&e))/>
+                                            "我已核实该订单已真实支付，并核对订单号、商家、客户、实付和计佣基数；理解服务器会在入账时重新匹配规则。"
+                                        </label>
+                                        <p class="error" hidden=move || phase.get() != WritePhase::Unknown>
+                                            "结果未知：不得更换订单号或幂等键，只能使用原请求核验/重试。"
+                                        </p>
+                                        <div class="actions">
+                                            <button hidden=move || phase.get() == WritePhase::Succeeded
+                                                disabled=move || !confirmed.get() || !phase.get().may_send()
+                                                on:click=move |_| {
+                                                    if !confirmed.get_untracked() || !phase.get_untracked().may_send() { return; }
+                                                    let Some(write) = pending.get_untracked() else { return; };
+                                                    let client = client.get_value();
+                                                    phase.set(WritePhase::Sending);
+                                                    spawn_local(async move {
+                                                        match client.execute(&write).await {
+                                                            Ok(value) => {
+                                                                capture_message.set(serde_json::to_string_pretty(&value).unwrap_or_default());
+                                                                phase.set(WritePhase::Succeeded);
+                                                            }
+                                                            Err(error) => {
+                                                                phase.set(if error.outcome_unknown() {
+                                                                    WritePhase::Unknown
+                                                                } else {
+                                                                    WritePhase::Rejected
+                                                                });
+                                                                capture_message.set(error.to_string());
+                                                            }
+                                                        }
+                                                    });
+                                                }>{move || if phase.get() == WritePhase::Unknown {
+                                                    "以原幂等键重试"
+                                                } else {
+                                                    "确认订单入账"
+                                                }}</button>
+                                            <button class="secondary" hidden=move || phase.get() == WritePhase::Succeeded
+                                                disabled=move || !phase.get().may_edit()
+                                                on:click=move |_| {
+                                                    if !phase.get_untracked().may_edit() { return; }
+                                                    let Some(write) = pending.get_untracked() else { return; };
+                                                    let client = client.get_value();
+                                                    phase.set(WritePhase::Preparing);
+                                                    spawn_local(async move {
+                                                        match client.discard(&write).await {
+                                                            Ok(()) => {
+                                                                pending.set(None);
+                                                                confirmed.set(false);
+                                                                phase.set(WritePhase::Editing);
+                                                                capture_message.set(String::new());
+                                                            }
+                                                            Err(error) => {
+                                                                phase.set(WritePhase::Rejected);
+                                                                capture_message.set(error.to_string());
+                                                            }
+                                                        }
+                                                    });
+                                                }>"返回修改订单号"</button>
+                                            <button hidden=move || phase.get() != WritePhase::Succeeded
+                                                on:click=move |_| {
+                                                    let Some(write) = pending.get_untracked() else { return; };
+                                                    let client = client.get_value();
+                                                    spawn_local(async move {
+                                                        match client.discard(&write).await {
+                                                            Ok(()) => {
+                                                                pending.set(None);
+                                                                confirmed.set(false);
+                                                                external_id.set(String::new());
+                                                                quoted.set(None);
+                                                                capture_message.set(String::new());
+                                                                phase.set(WritePhase::Editing);
+                                                                on_captured.run(());
+                                                            }
+                                                            Err(error) => capture_message.set(format!(
+                                                                "订单已成功入账，但本地请求清理失败：{error}。请重新登录后继续。"
+                                                            )),
+                                                        }
+                                                    });
+                                                }>"完成并查看订单"</button>
+                                        </div>
+                                    </div>
+                                    <pre role="status">{move || capture_message.get()}</pre>
+                                </div>
+                            }.into_any()
+                        } else {
+                            view! {
+                                <p class="muted">"当前身份只有试算权限，不能登记已支付订单。"</p>
+                            }.into_any()
+                        }}
+                    </div>
+                }
+            })}
         </section>
     }
 }
@@ -371,7 +641,8 @@ fn Operations(client: ClientStore, actor: Actor, phase: RwSignal<WritePhase>) ->
             op.allowed(&actor)
                 && !matches!(
                     op,
-                    Operation::RequestPayout
+                    Operation::CaptureOrder
+                        | Operation::RequestPayout
                         | Operation::ApprovePayout
                         | Operation::ProcessPayout
                         | Operation::RejectPayout
