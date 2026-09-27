@@ -6,3 +6,5 @@
 .order-detail h3{font-size:16px;margin:24px 0 10px}.order-summary{margin-bottom:22px}.refund-box{margin-top:26px;padding:20px;border:1px solid #dce5f3;border-radius:12px;background:#f9fbff}.refund-box h3{margin-top:0}.order-detail table button{white-space:nowrap}
 
 .payout-detail h3{font-size:16px;margin:24px 0 10px}.payout-summary{margin-bottom:22px}.payout-actions{display:grid;grid-template-columns:repeat(auto-fit,minmax(270px,1fr));gap:16px;margin-top:22px}.payout-action{padding:18px;border:1px solid #dce5f3;border-radius:12px;background:#f9fbff}.payout-action h3{margin-top:0}.status-chip{display:inline-block;padding:3px 10px;border-radius:999px;background:#eef3fb;color:#405b8a;font-size:12px;font-weight:700}
+
+.order-capture h3{font-size:16px;margin:24px 0 10px}.quote-result{margin-top:24px}.quote-summary{margin:14px 0 18px}.capture-box{margin-top:22px;padding:20px;border:1px solid #dce5f3;border-radius:12px;background:#f9fbff}.capture-box h3{margin-top:0}
