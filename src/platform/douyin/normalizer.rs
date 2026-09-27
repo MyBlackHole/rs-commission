@@ -544,7 +544,7 @@ fn parse_time(value: &Value) -> Result<DateTime<Utc>> {
                 .as_i64()
                 .or_else(|| number.as_u64().and_then(|v| i64::try_from(v).ok()))
                 .ok_or_else(|| PlatformError::invalid("抖音时间戳超出范围"))?;
-            let (seconds, nanos) = if raw.abs() >= 10_000_000_000 {
+            let (seconds, nanos) = if raw.unsigned_abs() >= 10_000_000_000 {
                 (raw / 1000, ((raw % 1000).unsigned_abs() as u32) * 1_000_000)
             } else {
                 (raw, 0)
