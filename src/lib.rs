@@ -5,6 +5,7 @@ pub mod http;
 pub mod ledger;
 pub mod model;
 pub mod money;
+pub mod platform;
 pub mod service;
 pub mod transaction;
 
