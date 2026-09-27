@@ -264,7 +264,7 @@ async fn commission_observations_preserve_unknown_vs_zero_and_projection_ownersh
 
 #[sqlx::test(migrations = "./migrations")]
 async fn checkpoints_can_advance_without_skipping_raw_ingestion(pool: PgPool) {
-    let connection = connection(&pool, "meitu", "distribution-import").await;
+    let connection = connection(&pool, "meituan", "distribution-import").await;
 
     sqlx::query(
         "INSERT INTO platform_sync_checkpoints
