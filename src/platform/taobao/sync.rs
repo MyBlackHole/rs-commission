@@ -1,7 +1,10 @@
 use crate::{
     platform::{
         normalized::{CommissionObservation, OrderObservation},
-        taobao::{client::TaobaoTransport, normalize_order_page, TaobaoClient, TaobaoOrderQuery, ORDER_STREAM},
+        taobao::{
+            client::TaobaoTransport, normalize_order_page, TaobaoClient, TaobaoOrderQuery,
+            ORDER_STREAM,
+        },
         PlatformError, Result,
     },
     transaction::{configure, digest},
@@ -90,13 +93,8 @@ impl<T: TaobaoTransport> TaobaoOrderSync<T> {
             upsert_order_observation(&mut tx, self.connection_id, raw_event_id, order).await?;
         }
         for commission in &page.commissions {
-            upsert_commission_observation(
-                &mut tx,
-                self.connection_id,
-                raw_event_id,
-                commission,
-            )
-            .await?;
+            upsert_commission_observation(&mut tx, self.connection_id, raw_event_id, commission)
+                .await?;
         }
 
         sqlx::query(
@@ -158,12 +156,11 @@ impl<T: TaobaoTransport> TaobaoOrderSync<T> {
     }
 
     async fn ensure_connection(&self) -> Result<()> {
-        let found: Option<(String, String)> = sqlx::query_as(
-            "SELECT platform,status FROM platform_connections WHERE id=$1",
-        )
-        .bind(self.connection_id)
-        .fetch_optional(&self.pool)
-        .await?;
+        let found: Option<(String, String)> =
+            sqlx::query_as("SELECT platform,status FROM platform_connections WHERE id=$1")
+                .bind(self.connection_id)
+                .fetch_optional(&self.pool)
+                .await?;
         match found {
             Some((platform, status)) if platform == "taobao" && status == "active" => Ok(()),
             Some((platform, _)) if platform != "taobao" => Err(PlatformError::invalid(
@@ -175,19 +172,16 @@ impl<T: TaobaoTransport> TaobaoOrderSync<T> {
     }
 
     async fn checkpoint(&self) -> Result<Option<Checkpoint>> {
-        let row: Option<(
-            Option<String>,
-            Option<DateTime<Utc>>,
-            Option<DateTime<Utc>>,
-        )> = sqlx::query_as(
-            "SELECT cursor,window_start,window_end
+        let row: Option<(Option<String>, Option<DateTime<Utc>>, Option<DateTime<Utc>>)> =
+            sqlx::query_as(
+                "SELECT cursor,window_start,window_end
              FROM platform_sync_checkpoints
              WHERE connection_id=$1 AND stream=$2",
-        )
-        .bind(self.connection_id)
-        .bind(ORDER_STREAM)
-        .fetch_optional(&self.pool)
-        .await?;
+            )
+            .bind(self.connection_id)
+            .bind(ORDER_STREAM)
+            .fetch_optional(&self.pool)
+            .await?;
         Ok(row.map(|(cursor, window_start, window_end)| Checkpoint {
             cursor,
             window_start,
@@ -254,9 +248,9 @@ fn next_window(
 ) -> Result<(DateTime<Utc>, DateTime<Utc>, Option<String>)> {
     if let Some(checkpoint) = checkpoint {
         if let Some(cursor) = &checkpoint.cursor {
-            let start = checkpoint
-                .window_start
-                .ok_or_else(|| PlatformError::invalid("淘宝 checkpoint cursor 缺少 window_start"))?;
+            let start = checkpoint.window_start.ok_or_else(|| {
+                PlatformError::invalid("淘宝 checkpoint cursor 缺少 window_start")
+            })?;
             let end = checkpoint
                 .window_end
                 .ok_or_else(|| PlatformError::invalid("淘宝 checkpoint cursor 缺少 window_end"))?;
