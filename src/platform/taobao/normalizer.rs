@@ -57,9 +57,8 @@ struct OrderDto {
 }
 
 pub fn normalize_order_page(raw: &Value) -> Result<NormalizedPage> {
-    let root: Root = serde_json::from_value(raw.clone()).map_err(|e| {
-        PlatformError::invalid(format!("淘宝订单响应结构不符合预期：{e}"))
-    })?;
+    let root: Root = serde_json::from_value(raw.clone())
+        .map_err(|e| PlatformError::invalid(format!("淘宝订单响应结构不符合预期：{e}")))?;
     let page = root.tbk_sc_order_details_get_response.data;
     if page.has_next && page.position_index.as_deref().is_none_or(str::is_empty) {
         return Err(PlatformError::invalid(
@@ -74,8 +73,9 @@ pub fn normalize_order_page(raw: &Value) -> Result<NormalizedPage> {
     for dto in page.results.publisher_order_dto {
         let source_updated_at = parse_time(&dto.modified_time)?;
         max_source_updated_at = Some(
-            max_source_updated_at
-                .map_or(source_updated_at, |v: DateTime<Utc>| v.max(source_updated_at)),
+            max_source_updated_at.map_or(source_updated_at, |v: DateTime<Utc>| {
+                v.max(source_updated_at)
+            }),
         );
         let paid_at = dto
             .tk_paid_time
@@ -129,8 +129,7 @@ pub fn normalize_order_page(raw: &Value) -> Result<NormalizedPage> {
         let gross_minor = if dto.tk_status == 12 {
             money(dto.pub_share_pre_fee.as_deref())?
         } else {
-            money(dto.pub_share_fee.as_deref())?
-                .or(money(dto.total_commission_fee.as_deref())?)
+            money(dto.pub_share_fee.as_deref())?.or(money(dto.total_commission_fee.as_deref())?)
         };
         let platform_service_fee_minor = money(dto.alimama_share_fee.as_deref())?;
         let net_minor = match (gross_minor, platform_service_fee_minor) {
@@ -143,7 +142,8 @@ pub fn normalize_order_page(raw: &Value) -> Result<NormalizedPage> {
             external_commission_key: format!(
                 "{}:publisher:{}",
                 dto.trade_id,
-                dto.pub_id.map_or_else(|| "unknown".into(), |v| v.to_string())
+                dto.pub_id
+                    .map_or_else(|| "unknown".into(), |v| v.to_string())
             ),
             external_order_line_id: dto.trade_id.clone(),
             external_beneficiary_id: dto.pub_id.map(|v| v.to_string()),
