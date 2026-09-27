@@ -130,7 +130,6 @@ impl DouyinMessageVerifier {
         }
         Ok(())
     }
-
 }
 
 fn canonical_json(value: &Value) -> Result<String> {
