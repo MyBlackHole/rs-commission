@@ -35,6 +35,33 @@ impl FixtureTransport {
     }
 }
 
+#[derive(Clone)]
+struct CheckpointAdvancingTransport {
+    pool: PgPool,
+    connection_id: Uuid,
+    response: Value,
+}
+
+#[async_trait]
+impl TaobaoTransport for CheckpointAdvancingTransport {
+    async fn execute(
+        &self,
+        _endpoint: &str,
+        _params: &BTreeMap<String, String>,
+    ) -> Result<Value> {
+        sqlx::query(
+            "INSERT INTO platform_sync_checkpoints
+             (connection_id,stream,cursor,window_start,window_end,last_attempt_at,last_success_at)
+             VALUES($1,'taobao_order_updated','other-worker',
+                    '2026-09-27T07:40:00Z','2026-09-27T08:00:00Z',now(),now())",
+        )
+        .bind(self.connection_id)
+        .execute(&self.pool)
+        .await?;
+        Ok(self.response.clone())
+    }
+}
+
 #[async_trait]
 impl TaobaoTransport for FixtureTransport {
     async fn execute(&self, _endpoint: &str, params: &BTreeMap<String, String>) -> Result<Value> {
@@ -243,6 +270,79 @@ async fn taobao_sync_resumes_cursor_projects_latest_state_and_never_posts_ledger
     .await
     .unwrap();
     assert_eq!(checkpoint_cursor, None);
+
+    let ledger_count: i64 = sqlx::query_scalar("SELECT count(*) FROM ledger_entries")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(ledger_count, 0);
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn taobao_sync_rejects_stale_checkpoint_without_losing_raw_page(pool: PgPool) {
+    let connection_id = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO platform_connections
+         (id,platform,external_account_id,display_name,connection_type,credential_ref)
+         VALUES($1,'taobao','publisher-race','淘宝并发测试','oauth','secret://taobao/race')",
+    )
+    .bind(connection_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let transport = CheckpointAdvancingTransport {
+        pool: pool.clone(),
+        connection_id,
+        response: page(
+            12,
+            "2026-09-27 15:50:00",
+            false,
+            None,
+            "10.00",
+            "0",
+        ),
+    };
+    let sync = TaobaoOrderSync::new(pool.clone(), connection_id, TaobaoClient::new(signer(), transport));
+
+    let error = sync
+        .sync_next(at("2026-09-27T08:00:00Z"))
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        error,
+        commission::platform::PlatformError::ConcurrentSync
+    ));
+
+    let raw: (i64, String) = sqlx::query_as(
+        "SELECT count(*),min(processing_status)
+         FROM platform_raw_events
+         WHERE connection_id=$1",
+    )
+    .bind(connection_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(raw, (1, "pending".into()));
+
+    let observations: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM external_order_observations WHERE connection_id=$1",
+    )
+    .bind(connection_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(observations, 0);
+
+    let cursor: Option<String> = sqlx::query_scalar(
+        "SELECT cursor FROM platform_sync_checkpoints
+         WHERE connection_id=$1 AND stream='taobao_order_updated'",
+    )
+    .bind(connection_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(cursor.as_deref(), Some("other-worker"));
 
     let ledger_count: i64 = sqlx::query_scalar("SELECT count(*) FROM ledger_entries")
         .fetch_one(&pool)
