@@ -300,8 +300,12 @@ impl<T: DouyinTransport> DouyinAllianceSync<T> {
         let batch = match normalize_reconcile_page(&raw, now) {
             Ok(batch) => batch,
             Err(error) => {
-                self.reject_raw(raw_state.id, "douyin_reconcile_normalize", &error.to_string())
-                    .await?;
+                self.reject_raw(
+                    raw_state.id,
+                    "douyin_reconcile_normalize",
+                    &error.to_string(),
+                )
+                .await?;
                 return Err(error);
             }
         };
