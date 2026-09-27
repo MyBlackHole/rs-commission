@@ -276,8 +276,7 @@ async fn refund_and_handshake_are_persisted_without_financial_posting(pool: PgPo
     assert_eq!(result.raw_events, 1);
     assert_eq!(result.order_observations, 0);
 
-    let second_handshake =
-        br#"[{"tag":"0","msg_id":"0","data":"2026-09-27T16:01:00+08:00"}]"#;
+    let second_handshake = br#"[{"tag":"0","msg_id":"0","data":"2026-09-27T16:01:00+08:00"}]"#;
     let second = sync
         .ingest_webhook(
             &verifier,
