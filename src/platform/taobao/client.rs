@@ -11,11 +11,7 @@ use super::{auth::TaobaoOrderQuery, TaobaoSigner, DEFAULT_ENDPOINT};
 
 #[async_trait]
 pub trait TaobaoTransport: Send + Sync {
-    async fn execute(
-        &self,
-        endpoint: &str,
-        params: &BTreeMap<String, String>,
-    ) -> Result<Value>;
+    async fn execute(&self, endpoint: &str, params: &BTreeMap<String, String>) -> Result<Value>;
 }
 
 #[derive(Clone)]
@@ -33,11 +29,7 @@ impl Default for ReqwestTaobaoTransport {
 
 #[async_trait]
 impl TaobaoTransport for ReqwestTaobaoTransport {
-    async fn execute(
-        &self,
-        endpoint: &str,
-        params: &BTreeMap<String, String>,
-    ) -> Result<Value> {
+    async fn execute(&self, endpoint: &str, params: &BTreeMap<String, String>) -> Result<Value> {
         let response = self
             .client
             .get(endpoint)
@@ -90,7 +82,10 @@ impl<T: TaobaoTransport> TaobaoClient<T> {
         let params = self.signer.signed_order_params(query, request_time)?;
         let raw = self.transport.execute(&self.endpoint, &params).await?;
         if let Some(error) = raw.get("error_response") {
-            let code = error.get("code").and_then(Value::as_i64).unwrap_or_default();
+            let code = error
+                .get("code")
+                .and_then(Value::as_i64)
+                .unwrap_or_default();
             let message = error
                 .get("sub_msg")
                 .or_else(|| error.get("msg"))
