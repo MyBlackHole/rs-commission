@@ -76,6 +76,18 @@ async fn raw_events_are_idempotent_and_payload_is_immutable(pool: PgPool) {
     .await;
     assert!(duplicate_fallback.is_err());
 
+    sqlx::query(
+        "INSERT INTO platform_raw_events
+         (id,connection_id,stream,event_type,payload,payload_hash)
+         VALUES($1,$2,'orders','refund.updated','{}',$3)",
+    )
+    .bind(Uuid::new_v4())
+    .bind(connection)
+    .bind("c".repeat(64))
+    .execute(&pool)
+    .await
+    .unwrap();
+
     assert!(sqlx::query(
         r#"UPDATE platform_raw_events SET payload='{"tampered":true}' WHERE id=$1"#
     )
