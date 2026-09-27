@@ -1,5 +1,7 @@
 pub mod connector;
+pub mod douyin;
 pub mod normalized;
+pub mod store;
 pub mod taobao;
 
 use thiserror::Error;
