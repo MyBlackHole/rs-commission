@@ -1,5 +1,6 @@
 pub mod connector;
 pub mod douyin;
+pub mod meituan;
 pub mod normalized;
 pub mod store;
 pub mod taobao;
