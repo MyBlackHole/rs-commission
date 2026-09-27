@@ -2,7 +2,7 @@
 pub enum Platform {
     Taobao,
     Douyin,
-    Meitu,
+    Meituan,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
