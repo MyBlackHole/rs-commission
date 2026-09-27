@@ -12,8 +12,8 @@ use serde_json::Value;
 use sqlx::{PgPool, Postgres, Transaction};
 use uuid::Uuid;
 
-const WINDOW: Duration = Duration::minutes(20);
-const OVERLAP: Duration = Duration::minutes(5);
+const WINDOW_MINUTES: i64 = 20;
+const OVERLAP_MINUTES: i64 = 5;
 const EVENT_TYPE: &str = "taobao.tbk.sc.order.details.get.page";
 const NORMALIZER_VERSION: i32 = 1;
 
@@ -84,12 +84,7 @@ impl<T: TaobaoTransport> TaobaoOrderSync<T> {
         }
 
         let mut tx = self.pool.begin().await?;
-        configure(&mut tx)
-            .await
-            .map_err(|e| PlatformError::Database(match e {
-                crate::error::Error::Internal => sqlx::Error::RowNotFound,
-                _ => sqlx::Error::Protocol(e.to_string()),
-            }))?;
+        configure(&mut tx).await?;
 
         for order in &page.orders {
             upsert_order_observation(&mut tx, self.connection_id, raw_event_id, order).await?;
@@ -269,14 +264,14 @@ fn next_window(
         }
 
         if let Some(previous_end) = checkpoint.window_end {
-            let start = previous_end - OVERLAP;
-            let end = (start + WINDOW).min(now);
+            let start = previous_end - Duration::minutes(OVERLAP_MINUTES);
+            let end = (start + Duration::minutes(WINDOW_MINUTES)).min(now);
             if end > start {
                 return Ok((start, end, None));
             }
         }
     }
-    Ok((now - WINDOW, now, None))
+    Ok((now - Duration::minutes(WINDOW_MINUTES), now, None))
 }
 
 async fn upsert_order_observation(
