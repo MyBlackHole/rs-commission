@@ -1,6 +1,6 @@
 use crate::{app::ClientStore, display::display, platform::Write};
 use commission_client::{bridge::WritePhase, Operation};
-use commission_types::{PayoutOutcome, ReasonInput};
+use commission_types::{Money, PayoutOutcome, ReasonInput, RequestPayout};
 use leptos::prelude::*;
 use serde_json::Value;
 use uuid::Uuid;
@@ -10,6 +10,8 @@ use wasm_bindgen_futures::spawn_local;
 pub fn PayoutsPanel(
     client: ClientStore,
     phase: RwSignal<WritePhase>,
+    can_request: bool,
+    fixed_account: Option<Uuid>,
     can_manage: bool,
 ) -> impl IntoView {
     let offset = RwSignal::new(0_u32);
@@ -58,6 +60,17 @@ pub fn PayoutsPanel(
     });
 
     view! {
+        {can_request.then(|| view! {
+            <PayoutRequest
+                client
+                phase
+                fixed_account
+                on_refresh=Callback::new(move |_| {
+                    offset.set(0);
+                    list_reload.update(|v| *v = v.wrapping_add(1));
+                })
+            />
+        })}
         <section class="panel">
             <div class="section-head">
                 <div>
@@ -107,6 +120,217 @@ pub fn PayoutsPanel(
                 }}
             </section>
         })}
+    }
+}
+
+#[component]
+fn PayoutRequest(
+    client: ClientStore,
+    phase: RwSignal<WritePhase>,
+    fixed_account: Option<Uuid>,
+    on_refresh: Callback<()>,
+) -> impl IntoView {
+    let external_id = RwSignal::new(String::new());
+    let account_id = RwSignal::new(fixed_account.map(|id| id.to_string()).unwrap_or_default());
+    let amount = RwSignal::new("100.00".to_owned());
+    let destination_ref = RwSignal::new(String::new());
+    let confirmed = RwSignal::new(false);
+    let pending = RwSignal::new_local(None::<Write>);
+    let message = RwSignal::new(String::new());
+
+    view! {
+        <section class="panel payout-request">
+            <div class="section-head"><div>
+                <h2>"申请提现"</h2>
+                <p class="muted">"申请成功会立即占用可用余额；这里只登记受控收款目标引用，不填写银行卡等敏感明文。"</p>
+            </div></div>
+            <div class="form-grid">
+                <label>"提现业务号"
+                    <input disabled=move || phase.get() != WritePhase::Editing
+                        prop:value=move || external_id.get()
+                        on:input=move |e| external_id.set(event_target_value(&e))
+                        autocomplete="off" placeholder="例如 payout-20260927-001"/>
+                </label>
+                <label>"受益账户 UUID"
+                    <input disabled=move || phase.get() != WritePhase::Editing || fixed_account.is_some()
+                        prop:value=move || account_id.get()
+                        on:input=move |e| account_id.set(event_target_value(&e))
+                        autocomplete="off"/>
+                </label>
+                <label>"提现金额（元）"
+                    <input disabled=move || phase.get() != WritePhase::Editing
+                        prop:value=move || amount.get()
+                        on:input=move |e| amount.set(event_target_value(&e))
+                        inputmode="decimal" autocomplete="off"/>
+                </label>
+                <label>"收款目标引用"
+                    <input disabled=move || phase.get() != WritePhase::Editing
+                        prop:value=move || destination_ref.get()
+                        on:input=move |e| destination_ref.set(event_target_value(&e))
+                        autocomplete="off" placeholder="例如 verified-payee-001"/>
+                </label>
+            </div>
+            {fixed_account.map(|id| view! {
+                <p class="notice">{format!("member 身份已锁定绑定账户：{id}")}</p>
+            })}
+            <button hidden=move || phase.get() != WritePhase::Editing
+                on:click=move |_| {
+                    if phase.get_untracked() != WritePhase::Editing { return; }
+                    let external = external_id.get_untracked();
+                    if external.trim().is_empty() {
+                        message.set("提现业务号不能为空".into());
+                        return;
+                    }
+                    let account = match fixed_account {
+                        Some(id) => id,
+                        None => match account_id.get_untracked().parse::<Uuid>() {
+                            Ok(id) => id,
+                            Err(_) => {
+                                message.set("受益账户 UUID 无效".into());
+                                return;
+                            }
+                        },
+                    };
+                    let amount_minor = match Money::from_yuan(&amount.get_untracked()) {
+                        Ok(value) if value.0 > 0 => value,
+                        Ok(_) => {
+                            message.set("提现金额必须大于 0".into());
+                            return;
+                        }
+                        Err(error) => {
+                            message.set(error.into());
+                            return;
+                        }
+                    };
+                    let destination = destination_ref.get_untracked();
+                    if destination.trim().is_empty() {
+                        message.set("收款目标引用不能为空".into());
+                        return;
+                    }
+                    let body = match serde_json::to_string(&RequestPayout {
+                        external_id: external.trim().to_owned(),
+                        account_id: account,
+                        amount_minor,
+                        destination_ref: destination.trim().to_owned(),
+                    }) {
+                        Ok(body) => body,
+                        Err(_) => {
+                            message.set("无法编码提现申请".into());
+                            return;
+                        }
+                    };
+                    message.set(String::new());
+                    phase.set(WritePhase::Preparing);
+                    let client = client.get_value();
+                    spawn_local(async move {
+                        match client.prepare(Operation::RequestPayout, None, &body).await {
+                            Ok(write) => {
+                                pending.set(Some(write));
+                                confirmed.set(false);
+                                phase.set(WritePhase::Prepared);
+                            }
+                            Err(e) => {
+                                phase.set(WritePhase::Editing);
+                                message.set(e.to_string());
+                            }
+                        }
+                    });
+                }>"校验提现申请"</button>
+            <div hidden=move || pending.get().is_none()>
+                <pre class="request-info">{move || pending.get().map(|w| format!(
+                    "POST /api/v1/{}\nIdempotency-Key: {}",
+                    w.path(),
+                    w.key()
+                )).unwrap_or_default()}</pre>
+                <label class="confirm">
+                    <input type="checkbox" prop:checked=move || confirmed.get()
+                        disabled=move || phase.get() == WritePhase::Sending
+                        on:change=move |e| confirmed.set(event_target_checked(&e))/>
+                    "我已核对提现业务号、账户、金额和收款目标；确认申请后立即占用可用余额。"
+                </label>
+                <p class="error" hidden=move || phase.get() != WritePhase::Unknown>
+                    "结果未知：不得创建新的提现申请，只能使用原幂等键继续核验/重试。"
+                </p>
+                <div class="actions">
+                    <button hidden=move || phase.get() == WritePhase::Succeeded
+                        disabled=move || !confirmed.get() || !phase.get().may_send()
+                        on:click=move |_| {
+                            if !confirmed.get_untracked() || !phase.get_untracked().may_send() { return; }
+                            let Some(write) = pending.get_untracked() else { return; };
+                            let client = client.get_value();
+                            phase.set(WritePhase::Sending);
+                            spawn_local(async move {
+                                match client.execute(&write).await {
+                                    Ok(value) => {
+                                        message.set(serde_json::to_string_pretty(&value).unwrap_or_default());
+                                        phase.set(WritePhase::Succeeded);
+                                    }
+                                    Err(e) => {
+                                        phase.set(if e.outcome_unknown() {
+                                            WritePhase::Unknown
+                                        } else {
+                                            WritePhase::Rejected
+                                        });
+                                        message.set(e.to_string());
+                                    }
+                                }
+                            });
+                        }>{move || if phase.get() == WritePhase::Unknown {
+                            "以原幂等键重试"
+                        } else {
+                            "确认申请提现"
+                        }}</button>
+                    <button class="secondary" hidden=move || phase.get() == WritePhase::Succeeded
+                        disabled=move || !phase.get().may_edit()
+                        on:click=move |_| {
+                            if !phase.get_untracked().may_edit() { return; }
+                            let Some(write) = pending.get_untracked() else { return; };
+                            let client = client.get_value();
+                            phase.set(WritePhase::Preparing);
+                            spawn_local(async move {
+                                match client.discard(&write).await {
+                                    Ok(()) => {
+                                        pending.set(None);
+                                        confirmed.set(false);
+                                        phase.set(WritePhase::Editing);
+                                        message.set(String::new());
+                                    }
+                                    Err(e) => {
+                                        phase.set(WritePhase::Rejected);
+                                        message.set(e.to_string());
+                                    }
+                                }
+                            });
+                        }>"返回修改"</button>
+                    <button hidden=move || phase.get() != WritePhase::Succeeded
+                        on:click=move |_| {
+                            let Some(write) = pending.get_untracked() else { return; };
+                            let client = client.get_value();
+                            spawn_local(async move {
+                                match client.discard(&write).await {
+                                    Ok(()) => {
+                                        pending.set(None);
+                                        confirmed.set(false);
+                                        external_id.set(String::new());
+                                        if fixed_account.is_none() {
+                                            account_id.set(String::new());
+                                        }
+                                        amount.set("100.00".into());
+                                        destination_ref.set(String::new());
+                                        message.set(String::new());
+                                        phase.set(WritePhase::Editing);
+                                        on_refresh.run(());
+                                    }
+                                    Err(e) => message.set(format!(
+                                        "申请已成功，但本地请求清理失败：{e}。请重新登录后继续。"
+                                    )),
+                                }
+                            });
+                        }>"完成并刷新提现列表"</button>
+                </div>
+            </div>
+            <pre role="status">{move || message.get()}</pre>
+        </section>
     }
 }
 
