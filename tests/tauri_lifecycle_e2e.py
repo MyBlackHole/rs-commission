@@ -128,9 +128,14 @@ class DriverError(RuntimeError):
 
 
 class W3C:
-    def __init__(self, base: str = "http://127.0.0.1:4444") -> None:
+    def __init__(
+        self,
+        base: str = "http://127.0.0.1:4444",
+        webview_user_data: Path | None = None,
+    ) -> None:
         self.base = base.rstrip("/")
         self.session: str | None = None
+        self.webview_user_data = webview_user_data
 
     def request(self, method: str, path: str, payload: object | None = None, timeout: int = 30):
         data = None
@@ -160,6 +165,12 @@ class W3C:
         return result
 
     def start(self) -> None:
+        tauri_options: dict[str, object] = {"application": str(APP)}
+        if WINDOWS and self.webview_user_data is not None:
+            self.webview_user_data.mkdir(parents=True, exist_ok=True)
+            tauri_options["webviewOptions"] = {
+                "userDataFolder": str(self.webview_user_data)
+            }
         result = self.request(
             "POST",
             "/session",
@@ -167,11 +178,11 @@ class W3C:
                 "capabilities": {
                     "alwaysMatch": {
                         "browserName": "wry",
-                        "tauri:options": {"application": str(APP)},
+                        "tauri:options": tauri_options,
                     }
                 }
             },
-            timeout=60,
+            timeout=120 if WINDOWS else 60,
         )
         value = result.get("value", {})
         self.session = value.get("sessionId") or result.get("sessionId")
@@ -259,15 +270,20 @@ class W3C:
         raise DriverError(f"element still present: {value}")
 
 
-def wait_tcp(port: int, timeout: float = 15.0) -> None:
+def wait_webdriver_ready(port: int, timeout: float = 20.0) -> None:
     deadline = time.monotonic() + timeout
+    url = f"http://127.0.0.1:{port}/status"
+    last: Exception | None = None
     while time.monotonic() < deadline:
-        with socket.socket() as sock:
-            sock.settimeout(0.25)
-            if sock.connect_ex(("127.0.0.1", port)) == 0:
-                return
-        time.sleep(0.1)
-    raise RuntimeError(f"port {port} did not open")
+        try:
+            with urllib.request.urlopen(url, timeout=2) as response:
+                if 200 <= response.status < 300:
+                    response.read()
+                    return
+        except (OSError, urllib.error.URLError, urllib.error.HTTPError) as error:
+            last = error
+        time.sleep(0.2)
+    raise RuntimeError(f"WebDriver on port {port} did not become ready: {last}")
 
 
 def app_pids() -> list[int]:
@@ -349,13 +365,7 @@ def wait_port_closed(port: int, timeout: float = 10.0) -> None:
 
 def start_tauri_driver(data_home: Path, log_name: str):
     env = os.environ.copy()
-    if WINDOWS:
-        local_home = data_home.parent / "local"
-        data_home.mkdir(parents=True, exist_ok=True)
-        local_home.mkdir(parents=True, exist_ok=True)
-        env["APPDATA"] = str(data_home)
-        env["LOCALAPPDATA"] = str(local_home)
-    else:
+    if not WINDOWS:
         env["XDG_DATA_HOME"] = str(data_home)
         env["XDG_CACHE_HOME"] = str(data_home.parent / "cache")
         env.setdefault("GDK_BACKEND", "x11")
@@ -379,7 +389,10 @@ def start_tauri_driver(data_home: Path, log_name: str):
     popen_args["stdout"] = log
     process = subprocess.Popen(command, **popen_args)
     try:
-        wait_tcp(4444)
+        # /status is a real WebDriver request; a raw TCP probe leaves an
+        # incomplete HTTP connection in tauri-driver and is especially harmful
+        # on the Windows/EdgeDriver startup path.
+        wait_webdriver_ready(4444)
     except Exception:
         process.kill()
         process.wait(timeout=5)
@@ -424,6 +437,15 @@ def recovery_files(data_home: Path) -> list[Path]:
     return list(data_home.rglob("pending-write-v1.json"))
 
 
+def clear_recovery_files(data_home: Path) -> None:
+    for name in ("pending-write-v1.json", "pending-write-v1.next"):
+        for path in data_home.rglob(name):
+            try:
+                path.unlink()
+            except FileNotFoundError:
+                pass
+
+
 def wait_recovery_files(data_home: Path, expected: int, timeout: float = 10.0) -> list[Path]:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
@@ -444,15 +466,21 @@ def main() -> None:
     origin = f"http://127.0.0.1:{server.server_port}"
 
     with tempfile.TemporaryDirectory(prefix="rs-commission-tauri-") as temp:
-        data_home = Path(temp) / "data"
-        data_home.mkdir(parents=True)
+        if WINDOWS:
+            data_home = Path(os.environ["APPDATA"]) / "com.rscommission.console"
+        else:
+            data_home = Path(temp) / "data"
+            data_home.mkdir(parents=True)
+        clear_recovery_files(data_home)
         first_process = second_process = None
         first_log = second_log = None
         first_client = second_client = None
         killed_pids: list[int] = []
         try:
             first_process, first_log = start_tauri_driver(data_home, "tauri-driver-first.log")
-            first_client = W3C()
+            first_client = W3C(
+                webview_user_data=Path(temp) / "webview-first"
+            )
             first_client.start()
             login(first_client, origin)
 
@@ -483,7 +511,9 @@ def main() -> None:
             first_client = None
 
             second_process, second_log = start_tauri_driver(data_home, "tauri-driver-second.log")
-            second_client = W3C()
+            second_client = W3C(
+                webview_user_data=Path(temp) / "webview-second"
+            )
             second_client.start()
             login(second_client, origin)
 
@@ -553,6 +583,7 @@ def main() -> None:
                 kill_driver(second_process, second_log)
             if first_process is not None and first_log is not None:
                 kill_driver(first_process, first_log)
+            clear_recovery_files(data_home)
             server.shutdown()
             server.server_close()
 
