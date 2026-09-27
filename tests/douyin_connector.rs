@@ -226,8 +226,8 @@ async fn webhook_is_verified_idempotent_and_out_of_order_safe(pool: PgPool) {
         "data": {"order_id":"DOU-ORDER-CHANGED","author_id":"KOL-1","update_time":1790495701_i64}
     }]))
     .unwrap();
-    assert!(
-        sync.ingest_webhook(
+    assert!(sync
+        .ingest_webhook(
             &verifier,
             "test-app",
             &sign_message(&changed),
@@ -235,8 +235,7 @@ async fn webhook_is_verified_idempotent_and_out_of_order_safe(pool: PgPool) {
             at("2026-09-27T08:04:00Z"),
         )
         .await
-        .is_err()
-    );
+        .is_err());
 
     let raw_count: i64 =
         sqlx::query_scalar("SELECT count(*) FROM platform_raw_events WHERE connection_id=$1")
@@ -376,7 +375,10 @@ async fn api_reconciliation_uses_same_projection_and_checkpoint(pool: PgPool) {
     assert_eq!(request.1, "/alliance/getOrderList");
     assert_eq!(request.2["method"], "alliance.getOrderList");
     assert_eq!(request.2["sign_method"], "hmac-sha256");
-    assert_eq!(request.3, r#"{"end_time":1790496600,"page_size":100,"start_time":1790494800}"#);
+    assert_eq!(
+        request.3,
+        r#"{"end_time":1790496600,"page_size":100,"start_time":1790494800}"#
+    );
 
     let checkpoint: (Option<String>, Option<DateTime<Utc>>) = sqlx::query_as(
         "SELECT cursor,last_platform_updated_at
@@ -388,7 +390,10 @@ async fn api_reconciliation_uses_same_projection_and_checkpoint(pool: PgPool) {
     .await
     .unwrap();
     assert_eq!(checkpoint.0.as_deref(), Some("cursor-2"));
-    assert_eq!(checkpoint.1, Some(DateTime::from_timestamp(1790496000, 0).unwrap()));
+    assert_eq!(
+        checkpoint.1,
+        Some(DateTime::from_timestamp(1790496000, 0).unwrap())
+    );
 
     let ledger_count: i64 = sqlx::query_scalar("SELECT count(*) FROM ledger_entries")
         .fetch_one(&pool)
