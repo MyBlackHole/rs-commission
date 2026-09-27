@@ -19,10 +19,12 @@ use std::{
 };
 use uuid::Uuid;
 
+type RecordedRequest = (String, String, BTreeMap<String, String>, String);
+
 #[derive(Clone, Default)]
 struct FixtureTransport {
     pages: Arc<Mutex<VecDeque<Value>>>,
-    requests: Arc<Mutex<Vec<(String, String, BTreeMap<String, String>, String)>>>,
+    requests: Arc<Mutex<Vec<RecordedRequest>>>,
 }
 
 impl FixtureTransport {
