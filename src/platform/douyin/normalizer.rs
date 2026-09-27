@@ -65,18 +65,9 @@ pub fn normalize_reconcile_page(raw: &Value, received_at: DateTime<Utc>) -> Resu
         } else {
             "kol"
         };
-        normalize_record(
-            record,
-            role,
-            Kind::Pay,
-            "reconcile",
-            received_at,
-            &mut batch,
-        )?;
-        if first(record, &["refund_amount", "refund_status", "after_sale_id"]).is_some() {
-            normalize_refund(record, role, "reconcile", received_at, &mut batch)?;
-        }
-        if first(
+        let has_refund =
+            first(record, &["refund_amount", "refund_status", "after_sale_id"]).is_some();
+        let has_settlement = first(
             record,
             &[
                 "settle_time",
@@ -85,10 +76,15 @@ pub fn normalize_reconcile_page(raw: &Value, received_at: DateTime<Utc>) -> Resu
                 "settle_commission",
             ],
         )
-        .is_some()
-        {
-            normalize_settlement(record, role, "reconcile", received_at, &mut batch)?;
-        }
+        .is_some();
+        let kind = if has_refund {
+            Kind::Refund
+        } else if has_settlement {
+            Kind::Settlement
+        } else {
+            Kind::Pay
+        };
+        normalize_record(record, role, kind, "reconcile", received_at, &mut batch)?;
     }
     Ok(batch)
 }
