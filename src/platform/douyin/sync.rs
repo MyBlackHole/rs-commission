@@ -84,9 +84,9 @@ impl<T> DouyinAllianceSync<T> {
 
         for message in messages {
             let payload = json!({
-                "tag": message.tag,
-                "msg_id": message.msg_id,
-                "data": message.data,
+                "tag": &message.tag,
+                "msg_id": &message.msg_id,
+                "data": &message.data,
             });
             let raw = self
                 .persist_raw(
@@ -96,7 +96,9 @@ impl<T> DouyinAllianceSync<T> {
                     &payload,
                 )
                 .await?;
-            outcome.raw_events += usize::from(raw.inserted);
+            if raw.inserted {
+                outcome.raw_events += 1;
+            }
 
             if !raw.inserted && raw.processing_status == "normalized" {
                 outcome.duplicates += 1;
