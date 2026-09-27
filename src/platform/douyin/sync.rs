@@ -26,6 +26,7 @@ pub struct WebhookOutcome {
     pub commission_observations: usize,
     pub refund_observations: usize,
     pub settlement_observations: usize,
+    pub ignored_messages: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -88,10 +89,15 @@ impl<T> DouyinAllianceSync<T> {
                 "msg_id": &message.msg_id,
                 "data": &message.data,
             });
+            let external_event_id = if message.tag == "0" {
+                None
+            } else {
+                Some(message.msg_id.as_str())
+            };
             let raw = self
                 .persist_raw(
                     WEBHOOK_STREAM,
-                    Some(&message.msg_id),
+                    external_event_id,
                     &format!("douyin.alliance.tag.{}", message.tag),
                     &payload,
                 )
@@ -110,12 +116,9 @@ impl<T> DouyinAllianceSync<T> {
                 continue;
             }
             if !ALLIANCE_TAGS.contains(&message.tag.as_str()) {
-                self.reject_raw(raw.id, "unsupported_tag", "非精选联盟消息 tag")
-                    .await?;
-                return Err(PlatformError::invalid(format!(
-                    "不支持的抖音精选联盟消息 tag：{}",
-                    message.tag
-                )));
+                self.mark_raw_normalized(raw.id).await?;
+                outcome.ignored_messages += 1;
+                continue;
             }
 
             let batch = match normalize_alliance_message(&message, received_at) {
