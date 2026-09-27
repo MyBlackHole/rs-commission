@@ -41,6 +41,46 @@ pub struct CommissionObservation {
     pub metadata: Value,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RefundObservation {
+    pub external_refund_id: String,
+    pub external_order_line_id: String,
+    pub refund_status: String,
+    pub currency: String,
+    pub refund_minor: Option<i64>,
+    pub commission_reversal_minor: Option<i64>,
+    pub occurred_at: Option<DateTime<Utc>>,
+    pub source_updated_at: DateTime<Utc>,
+    pub metadata: Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SettlementObservation {
+    pub external_settlement_id: String,
+    pub external_commission_key: Option<String>,
+    pub external_order_line_id: Option<String>,
+    pub currency: String,
+    pub gross_minor: Option<i64>,
+    pub fee_minor: Option<i64>,
+    pub net_minor: Option<i64>,
+    pub settlement_status: String,
+    pub settled_at: Option<DateTime<Utc>>,
+    pub funded_at: Option<DateTime<Utc>>,
+    pub statement_period: Option<String>,
+    pub provider_reference: Option<String>,
+    pub source_updated_at: DateTime<Utc>,
+    pub metadata: Value,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct NormalizedBatch {
+    pub orders: Vec<OrderObservation>,
+    pub commissions: Vec<CommissionObservation>,
+    pub refunds: Vec<RefundObservation>,
+    pub settlements: Vec<SettlementObservation>,
+    pub max_source_updated_at: Option<DateTime<Utc>>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NormalizedPage {
     pub orders: Vec<OrderObservation>,

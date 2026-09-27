@@ -611,6 +611,7 @@ dependencies = [
  "hex",
  "hmac",
  "http-body-util",
+ "md-5",
  "proptest",
  "rand 0.8.8",
  "reqwest",

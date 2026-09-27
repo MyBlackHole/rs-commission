@@ -1,6 +1,6 @@
 use crate::{
     platform::{
-        normalized::{CommissionObservation, OrderObservation},
+        store::{upsert_commission_observation, upsert_order_observation},
         taobao::{
             client::TaobaoTransport, normalize_order_page, TaobaoClient, TaobaoOrderQuery,
             ORDER_STREAM,
@@ -10,7 +10,6 @@ use crate::{
     transaction::{configure, digest},
 };
 use chrono::{DateTime, Duration, Utc};
-use serde::Serialize;
 use serde_json::Value;
 use sqlx::{PgPool, Postgres, Transaction};
 use uuid::Uuid;
@@ -96,11 +95,24 @@ impl<T: TaobaoTransport> TaobaoOrderSync<T> {
         }
 
         for order in &page.orders {
-            upsert_order_observation(&mut tx, self.connection_id, raw_event_id, order).await?;
+            upsert_order_observation(
+                &mut tx,
+                self.connection_id,
+                raw_event_id,
+                order,
+                NORMALIZER_VERSION,
+            )
+            .await?;
         }
         for commission in &page.commissions {
-            upsert_commission_observation(&mut tx, self.connection_id, raw_event_id, commission)
-                .await?;
+            upsert_commission_observation(
+                &mut tx,
+                self.connection_id,
+                raw_event_id,
+                commission,
+                NORMALIZER_VERSION,
+            )
+            .await?;
         }
 
         sqlx::query(
@@ -295,197 +307,3 @@ fn next_window(
     Ok((now - Duration::minutes(WINDOW_MINUTES), now, None))
 }
 
-async fn upsert_order_observation(
-    tx: &mut Transaction<'_, Postgres>,
-    connection_id: Uuid,
-    raw_event_id: Uuid,
-    order: &OrderObservation,
-) -> Result<()> {
-    let observation_hash = hash(order)?;
-    let candidate = Uuid::new_v4();
-    let observation_id: Uuid = match sqlx::query_scalar(
-        "INSERT INTO external_order_observations
-         (id,connection_id,raw_event_id,external_parent_order_id,external_order_line_id,
-          external_product_id,external_promoter_id,external_position_id,merchant_ref,customer_ref,
-          currency,paid_minor,settlement_base_minor,raw_status,paid_at,completed_at,
-          source_updated_at,normalizer_version,observation_hash,normalized_payload)
-         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
-         ON CONFLICT(raw_event_id,observation_hash) DO NOTHING
-         RETURNING id",
-    )
-    .bind(candidate)
-    .bind(connection_id)
-    .bind(raw_event_id)
-    .bind(&order.external_parent_order_id)
-    .bind(&order.external_order_line_id)
-    .bind(&order.external_product_id)
-    .bind(&order.external_promoter_id)
-    .bind(&order.external_position_id)
-    .bind(&order.merchant_ref)
-    .bind(&order.customer_ref)
-    .bind(&order.currency)
-    .bind(order.paid_minor)
-    .bind(order.settlement_base_minor)
-    .bind(&order.raw_status)
-    .bind(order.paid_at)
-    .bind(order.completed_at)
-    .bind(order.source_updated_at)
-    .bind(NORMALIZER_VERSION)
-    .bind(&observation_hash)
-    .bind(&order.normalized_payload)
-    .fetch_optional(&mut **tx)
-    .await?
-    {
-        Some(id) => id,
-        None => {
-            sqlx::query_scalar(
-                "SELECT id FROM external_order_observations
-                 WHERE raw_event_id=$1 AND observation_hash=$2",
-            )
-            .bind(raw_event_id)
-            .bind(&observation_hash)
-            .fetch_one(&mut **tx)
-            .await?
-        }
-    };
-
-    sqlx::query(
-        "INSERT INTO external_orders
-         (connection_id,external_order_line_id,latest_observation_id,external_parent_order_id,
-          normalized_status,raw_status,currency,paid_minor,settlement_base_minor,paid_at,
-          completed_at,last_platform_updated_at,updated_at)
-         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,now())
-         ON CONFLICT(connection_id,external_order_line_id) DO UPDATE SET
-          latest_observation_id=EXCLUDED.latest_observation_id,
-          external_parent_order_id=EXCLUDED.external_parent_order_id,
-          normalized_status=EXCLUDED.normalized_status,
-          raw_status=EXCLUDED.raw_status,
-          currency=EXCLUDED.currency,
-          paid_minor=EXCLUDED.paid_minor,
-          settlement_base_minor=EXCLUDED.settlement_base_minor,
-          paid_at=EXCLUDED.paid_at,
-          completed_at=EXCLUDED.completed_at,
-          last_platform_updated_at=EXCLUDED.last_platform_updated_at,
-          updated_at=now()
-         WHERE EXCLUDED.last_platform_updated_at >= external_orders.last_platform_updated_at",
-    )
-    .bind(connection_id)
-    .bind(&order.external_order_line_id)
-    .bind(observation_id)
-    .bind(&order.external_parent_order_id)
-    .bind(&order.normalized_status)
-    .bind(&order.raw_status)
-    .bind(&order.currency)
-    .bind(order.paid_minor)
-    .bind(order.settlement_base_minor)
-    .bind(order.paid_at)
-    .bind(order.completed_at)
-    .bind(order.source_updated_at)
-    .execute(&mut **tx)
-    .await?;
-    Ok(())
-}
-
-async fn upsert_commission_observation(
-    tx: &mut Transaction<'_, Postgres>,
-    connection_id: Uuid,
-    raw_event_id: Uuid,
-    commission: &CommissionObservation,
-) -> Result<()> {
-    let observation_hash = hash(commission)?;
-    let candidate = Uuid::new_v4();
-    let observation_id: Uuid = match sqlx::query_scalar(
-        "INSERT INTO external_commission_observations
-         (id,connection_id,raw_event_id,external_commission_key,external_order_line_id,
-          external_beneficiary_id,beneficiary_role,phase,funding_phase,currency,gross_minor,
-          platform_service_fee_minor,special_service_fee_minor,institution_share_minor,net_minor,
-          raw_status,source_updated_at,normalizer_version,observation_hash,metadata)
-         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
-         ON CONFLICT(raw_event_id,observation_hash) DO NOTHING
-         RETURNING id",
-    )
-    .bind(candidate)
-    .bind(connection_id)
-    .bind(raw_event_id)
-    .bind(&commission.external_commission_key)
-    .bind(&commission.external_order_line_id)
-    .bind(&commission.external_beneficiary_id)
-    .bind(&commission.beneficiary_role)
-    .bind(&commission.phase)
-    .bind(&commission.funding_phase)
-    .bind(&commission.currency)
-    .bind(commission.gross_minor)
-    .bind(commission.platform_service_fee_minor)
-    .bind(commission.special_service_fee_minor)
-    .bind(commission.institution_share_minor)
-    .bind(commission.net_minor)
-    .bind(&commission.raw_status)
-    .bind(commission.source_updated_at)
-    .bind(NORMALIZER_VERSION)
-    .bind(&observation_hash)
-    .bind(&commission.metadata)
-    .fetch_optional(&mut **tx)
-    .await?
-    {
-        Some(id) => id,
-        None => {
-            sqlx::query_scalar(
-                "SELECT id FROM external_commission_observations
-                 WHERE raw_event_id=$1 AND observation_hash=$2",
-            )
-            .bind(raw_event_id)
-            .bind(&observation_hash)
-            .fetch_one(&mut **tx)
-            .await?
-        }
-    };
-
-    sqlx::query(
-        "INSERT INTO external_commissions
-         (connection_id,external_commission_key,latest_observation_id,external_order_line_id,
-          beneficiary_role,beneficiary_ref,phase,funding_phase,currency,gross_minor,
-          platform_service_fee_minor,special_service_fee_minor,institution_share_minor,net_minor,
-          raw_status,last_platform_updated_at,updated_at)
-         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,now())
-         ON CONFLICT(connection_id,external_commission_key) DO UPDATE SET
-          latest_observation_id=EXCLUDED.latest_observation_id,
-          external_order_line_id=EXCLUDED.external_order_line_id,
-          beneficiary_role=EXCLUDED.beneficiary_role,
-          beneficiary_ref=EXCLUDED.beneficiary_ref,
-          phase=EXCLUDED.phase,
-          funding_phase=EXCLUDED.funding_phase,
-          currency=EXCLUDED.currency,
-          gross_minor=EXCLUDED.gross_minor,
-          platform_service_fee_minor=EXCLUDED.platform_service_fee_minor,
-          special_service_fee_minor=EXCLUDED.special_service_fee_minor,
-          institution_share_minor=EXCLUDED.institution_share_minor,
-          net_minor=EXCLUDED.net_minor,
-          raw_status=EXCLUDED.raw_status,
-          last_platform_updated_at=EXCLUDED.last_platform_updated_at,
-          updated_at=now()
-         WHERE EXCLUDED.last_platform_updated_at >= external_commissions.last_platform_updated_at",
-    )
-    .bind(connection_id)
-    .bind(&commission.external_commission_key)
-    .bind(observation_id)
-    .bind(&commission.external_order_line_id)
-    .bind(&commission.beneficiary_role)
-    .bind(&commission.external_beneficiary_id)
-    .bind(&commission.phase)
-    .bind(&commission.funding_phase)
-    .bind(&commission.currency)
-    .bind(commission.gross_minor)
-    .bind(commission.platform_service_fee_minor)
-    .bind(commission.special_service_fee_minor)
-    .bind(commission.institution_share_minor)
-    .bind(commission.net_minor)
-    .bind(&commission.raw_status)
-    .bind(commission.source_updated_at)
-    .execute(&mut **tx)
-    .await?;
-    Ok(())
-}
-
-fn hash<T: Serialize>(value: &T) -> Result<String> {
-    Ok(digest(&serde_json::to_vec(value)?))
-}
