@@ -31,12 +31,18 @@ pub struct SyncOutcome {
     pub commission_observations: usize,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct Checkpoint {
     cursor: Option<String>,
     window_start: Option<DateTime<Utc>>,
     window_end: Option<DateTime<Utc>>,
 }
+
+type CheckpointRow = (
+    Option<String>,
+    Option<DateTime<Utc>>,
+    Option<DateTime<Utc>>,
+);
 
 pub struct TaobaoOrderSync<T> {
     pool: PgPool,
@@ -88,6 +94,10 @@ impl<T: TaobaoTransport> TaobaoOrderSync<T> {
 
         let mut tx = self.pool.begin().await?;
         configure(&mut tx).await?;
+        let current_checkpoint = lock_checkpoint(&mut tx, self.connection_id).await?;
+        if current_checkpoint != checkpoint {
+            return Err(PlatformError::ConcurrentSync);
+        }
 
         for order in &page.orders {
             upsert_order_observation(&mut tx, self.connection_id, raw_event_id, order).await?;
@@ -172,21 +182,16 @@ impl<T: TaobaoTransport> TaobaoOrderSync<T> {
     }
 
     async fn checkpoint(&self) -> Result<Option<Checkpoint>> {
-        let row: Option<(Option<String>, Option<DateTime<Utc>>, Option<DateTime<Utc>>)> =
-            sqlx::query_as(
-                "SELECT cursor,window_start,window_end
+        let row: Option<CheckpointRow> = sqlx::query_as(
+            "SELECT cursor,window_start,window_end
              FROM platform_sync_checkpoints
              WHERE connection_id=$1 AND stream=$2",
-            )
-            .bind(self.connection_id)
-            .bind(ORDER_STREAM)
-            .fetch_optional(&self.pool)
-            .await?;
-        Ok(row.map(|(cursor, window_start, window_end)| Checkpoint {
-            cursor,
-            window_start,
-            window_end,
-        }))
+        )
+        .bind(self.connection_id)
+        .bind(ORDER_STREAM)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.map(checkpoint_from_row))
     }
 
     async fn persist_raw(&self, raw: &Value) -> Result<Uuid> {
@@ -240,6 +245,32 @@ impl<T: TaobaoTransport> TaobaoOrderSync<T> {
         .await?;
         Ok(())
     }
+}
+
+fn checkpoint_from_row(row: CheckpointRow) -> Checkpoint {
+    let (cursor, window_start, window_end) = row;
+    Checkpoint {
+        cursor,
+        window_start,
+        window_end,
+    }
+}
+
+async fn lock_checkpoint(
+    tx: &mut Transaction<'_, Postgres>,
+    connection_id: Uuid,
+) -> Result<Option<Checkpoint>> {
+    let row: Option<CheckpointRow> = sqlx::query_as(
+        "SELECT cursor,window_start,window_end
+         FROM platform_sync_checkpoints
+         WHERE connection_id=$1 AND stream=$2
+         FOR UPDATE",
+    )
+    .bind(connection_id)
+    .bind(ORDER_STREAM)
+    .fetch_optional(&mut **tx)
+    .await?;
+    Ok(row.map(checkpoint_from_row))
 }
 
 fn next_window(
