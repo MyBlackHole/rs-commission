@@ -72,7 +72,8 @@ impl TaobaoSigner {
         request_time: DateTime<Utc>,
     ) -> Result<BTreeMap<String, String>> {
         query.validate()?;
-        let china = FixedOffset::east_opt(8 * 3600).ok_or_else(|| PlatformError::invalid("无效时区"))?;
+        let china =
+            FixedOffset::east_opt(8 * 3600).ok_or_else(|| PlatformError::invalid("无效时区"))?;
         let fmt = |v: DateTime<Utc>| {
             v.with_timezone(&china)
                 .format("%Y-%m-%d %H:%M:%S")
