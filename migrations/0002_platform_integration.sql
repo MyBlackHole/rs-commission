@@ -34,8 +34,7 @@ CREATE TABLE platform_sync_checkpoints (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY(connection_id, stream),
     CHECK (window_end IS NULL OR window_start IS NOT NULL),
-    CHECK (window_end IS NULL OR window_end >= window_start),
-    CHECK (last_success_at IS NULL OR last_attempt_at IS NULL OR last_success_at <= last_attempt_at)
+    CHECK (window_end IS NULL OR window_end >= window_start)
 );
 
 CREATE TABLE platform_raw_events (
@@ -56,7 +55,8 @@ CREATE TABLE platform_raw_events (
     error_detail TEXT,
     CHECK (platform_updated_at IS NULL OR platform_created_at IS NULL OR platform_updated_at >= platform_created_at),
     CHECK (processing_status <> 'normalized' OR normalizer_version IS NOT NULL),
-    CHECK (processing_status <> 'rejected' OR error_code IS NOT NULL)
+    CHECK (processing_status <> 'rejected' OR error_code IS NOT NULL),
+    UNIQUE(id, connection_id)
 );
 CREATE UNIQUE INDEX raw_event_external_id
     ON platform_raw_events(connection_id, stream, external_event_id)
@@ -131,7 +131,8 @@ FOR EACH ROW EXECUTE FUNCTION deny_mutation();
 CREATE TABLE external_order_observations (
     id UUID PRIMARY KEY,
     connection_id UUID NOT NULL REFERENCES platform_connections(id),
-    raw_event_id UUID NOT NULL REFERENCES platform_raw_events(id),
+    raw_event_id UUID NOT NULL,
+
     external_parent_order_id TEXT,
     external_order_line_id TEXT NOT NULL CHECK (length(external_order_line_id) BETWEEN 1 AND 256),
     external_product_id TEXT,
@@ -151,7 +152,10 @@ CREATE TABLE external_order_observations (
     observation_hash TEXT NOT NULL CHECK (length(observation_hash) = 64),
     normalized_payload JSONB NOT NULL DEFAULT '{}',
     CHECK (completed_at IS NULL OR paid_at IS NULL OR completed_at >= paid_at),
-    UNIQUE(raw_event_id, observation_hash)
+    UNIQUE(raw_event_id, observation_hash),
+    UNIQUE(connection_id, external_order_line_id, id),
+    FOREIGN KEY(raw_event_id, connection_id)
+        REFERENCES platform_raw_events(id, connection_id)
 );
 CREATE INDEX external_order_observation_key
     ON external_order_observations(connection_id, external_order_line_id, source_updated_at DESC, id DESC);
@@ -173,7 +177,9 @@ CREATE TABLE external_orders (
     completed_at TIMESTAMPTZ,
     last_platform_updated_at TIMESTAMPTZ NOT NULL,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    PRIMARY KEY(connection_id, external_order_line_id)
+    PRIMARY KEY(connection_id, external_order_line_id),
+    FOREIGN KEY(connection_id, external_order_line_id, latest_observation_id)
+        REFERENCES external_order_observations(connection_id, external_order_line_id, id)
 );
 CREATE UNIQUE INDEX external_orders_latest_observation
     ON external_orders(latest_observation_id);
@@ -181,7 +187,7 @@ CREATE UNIQUE INDEX external_orders_latest_observation
 CREATE TABLE external_commission_observations (
     id UUID PRIMARY KEY,
     connection_id UUID NOT NULL REFERENCES platform_connections(id),
-    raw_event_id UUID NOT NULL REFERENCES platform_raw_events(id),
+    raw_event_id UUID NOT NULL,
     external_commission_key TEXT NOT NULL CHECK (length(external_commission_key) BETWEEN 1 AND 320),
     external_order_line_id TEXT NOT NULL CHECK (length(external_order_line_id) BETWEEN 1 AND 256),
     external_beneficiary_id TEXT,
@@ -200,7 +206,10 @@ CREATE TABLE external_commission_observations (
     normalizer_version INTEGER NOT NULL CHECK (normalizer_version > 0),
     observation_hash TEXT NOT NULL CHECK (length(observation_hash) = 64),
     metadata JSONB NOT NULL DEFAULT '{}',
-    UNIQUE(raw_event_id, observation_hash)
+    UNIQUE(raw_event_id, observation_hash),
+    UNIQUE(connection_id, external_commission_key, id),
+    FOREIGN KEY(raw_event_id, connection_id)
+        REFERENCES platform_raw_events(id, connection_id)
 );
 CREATE INDEX external_commission_observation_key
     ON external_commission_observations(connection_id, external_commission_key, source_updated_at DESC, id DESC);
@@ -228,7 +237,9 @@ CREATE TABLE external_commissions (
     raw_status TEXT NOT NULL,
     last_platform_updated_at TIMESTAMPTZ NOT NULL,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    PRIMARY KEY(connection_id, external_commission_key)
+    PRIMARY KEY(connection_id, external_commission_key),
+    FOREIGN KEY(connection_id, external_commission_key, latest_observation_id)
+        REFERENCES external_commission_observations(connection_id, external_commission_key, id)
 );
 CREATE UNIQUE INDEX external_commissions_latest_observation
     ON external_commissions(latest_observation_id);
@@ -238,7 +249,7 @@ CREATE INDEX external_commissions_order
 CREATE TABLE external_refund_observations (
     id UUID PRIMARY KEY,
     connection_id UUID NOT NULL REFERENCES platform_connections(id),
-    raw_event_id UUID NOT NULL REFERENCES platform_raw_events(id),
+    raw_event_id UUID NOT NULL,
     external_refund_id TEXT NOT NULL CHECK (length(external_refund_id) BETWEEN 1 AND 256),
     external_order_line_id TEXT NOT NULL CHECK (length(external_order_line_id) BETWEEN 1 AND 256),
     refund_status TEXT NOT NULL CHECK (length(refund_status) BETWEEN 1 AND 128),
@@ -251,7 +262,9 @@ CREATE TABLE external_refund_observations (
     normalizer_version INTEGER NOT NULL CHECK (normalizer_version > 0),
     observation_hash TEXT NOT NULL CHECK (length(observation_hash) = 64),
     metadata JSONB NOT NULL DEFAULT '{}',
-    UNIQUE(raw_event_id, observation_hash)
+    UNIQUE(raw_event_id, observation_hash),
+    FOREIGN KEY(raw_event_id, connection_id)
+        REFERENCES platform_raw_events(id, connection_id)
 );
 CREATE INDEX external_refund_observation_key
     ON external_refund_observations(connection_id, external_refund_id, source_updated_at DESC, id DESC);
@@ -264,7 +277,7 @@ FOR EACH ROW EXECUTE FUNCTION deny_mutation();
 CREATE TABLE external_settlement_observations (
     id UUID PRIMARY KEY,
     connection_id UUID NOT NULL REFERENCES platform_connections(id),
-    raw_event_id UUID NOT NULL REFERENCES platform_raw_events(id),
+    raw_event_id UUID NOT NULL,
     external_settlement_id TEXT NOT NULL CHECK (length(external_settlement_id) BETWEEN 1 AND 256),
     external_commission_key TEXT,
     external_order_line_id TEXT,
@@ -284,7 +297,9 @@ CREATE TABLE external_settlement_observations (
     metadata JSONB NOT NULL DEFAULT '{}',
     CHECK (funded_at IS NULL OR settled_at IS NULL OR funded_at >= settled_at),
     CHECK (external_commission_key IS NOT NULL OR external_order_line_id IS NOT NULL),
-    UNIQUE(raw_event_id, observation_hash)
+    UNIQUE(raw_event_id, observation_hash),
+    FOREIGN KEY(raw_event_id, connection_id)
+        REFERENCES platform_raw_events(id, connection_id)
 );
 CREATE INDEX external_settlement_observation_key
     ON external_settlement_observations(connection_id, external_settlement_id, source_updated_at DESC, id DESC);
