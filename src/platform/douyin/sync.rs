@@ -39,6 +39,8 @@ pub struct ReconcileOutcome {
     pub next_cursor: Option<String>,
 }
 
+type ReconcileCheckpoint = (Option<String>, Option<DateTime<Utc>>);
+
 pub struct DouyinAllianceSync<T> {
     pool: PgPool,
     connection_id: Uuid,
@@ -68,6 +70,19 @@ impl<T> DouyinAllianceSync<T> {
             Some(_) => Err(PlatformError::invalid("抖音 platform connection 未启用")),
             None => Err(PlatformError::invalid("抖音 platform connection 不存在")),
         }
+    }
+
+    async fn reconcile_checkpoint(&self) -> Result<Option<ReconcileCheckpoint>> {
+        sqlx::query_as(
+            "SELECT cursor,last_platform_updated_at
+             FROM platform_sync_checkpoints
+             WHERE connection_id=$1 AND stream=$2",
+        )
+        .bind(self.connection_id)
+        .bind(RECONCILE_STREAM)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(Into::into)
     }
 
     pub async fn ingest_webhook(
@@ -288,6 +303,7 @@ impl<T: DouyinTransport> DouyinAllianceSync<T> {
         now: DateTime<Utc>,
     ) -> Result<ReconcileOutcome> {
         self.ensure_connection().await?;
+        let checkpoint = self.reconcile_checkpoint().await?;
         let raw = self
             .client
             .call(ORDER_PATH, ORDER_METHOD, params, now)
@@ -316,6 +332,11 @@ impl<T: DouyinTransport> DouyinAllianceSync<T> {
 
         let mut tx = self.pool.begin().await?;
         configure(&mut tx).await?;
+        let current_checkpoint =
+            lock_reconcile_checkpoint(&mut tx, self.connection_id).await?;
+        if current_checkpoint != checkpoint {
+            return Err(PlatformError::ConcurrentSync);
+        }
         for order in &batch.orders {
             upsert_order_observation(
                 &mut tx,
@@ -399,6 +420,23 @@ struct RawState {
     id: Uuid,
     inserted: bool,
     processing_status: String,
+}
+
+async fn lock_reconcile_checkpoint(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    connection_id: Uuid,
+) -> Result<Option<ReconcileCheckpoint>> {
+    sqlx::query_as(
+        "SELECT cursor,last_platform_updated_at
+         FROM platform_sync_checkpoints
+         WHERE connection_id=$1 AND stream=$2
+         FOR UPDATE",
+    )
+    .bind(connection_id)
+    .bind(RECONCILE_STREAM)
+    .fetch_optional(&mut **tx)
+    .await
+    .map_err(Into::into)
 }
 
 async fn mark_raw_normalized_tx(
