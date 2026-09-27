@@ -38,11 +38,7 @@ struct Checkpoint {
     window_end: Option<DateTime<Utc>>,
 }
 
-type CheckpointRow = (
-    Option<String>,
-    Option<DateTime<Utc>>,
-    Option<DateTime<Utc>>,
-);
+type CheckpointRow = (Option<String>, Option<DateTime<Utc>>, Option<DateTime<Utc>>);
 
 pub struct TaobaoOrderSync<T> {
     pool: PgPool,
