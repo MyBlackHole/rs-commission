@@ -204,55 +204,48 @@ fn normalize_record(
         normalized_payload: record.clone(),
     });
 
-    match kind {
-        Kind::Pay => normalize_commission(
-            record,
-            role,
-            &order_id,
-            "estimated",
-            "unfunded",
-            &raw_status,
+    let commission_state = match kind {
+        Kind::Pay => CommissionState {
+            phase: "estimated",
+            funding_phase: "unfunded",
+            raw_status: &raw_status,
             source_updated_at,
-            batch,
-        )?,
+        },
         Kind::Refund => {
             normalize_refund(record, role, message_id, received_at, batch)?;
-            normalize_commission(
-                record,
-                role,
-                &order_id,
-                "reversed",
-                "reversed",
-                &raw_status,
+            CommissionState {
+                phase: "reversed",
+                funding_phase: "reversed",
+                raw_status: &raw_status,
                 source_updated_at,
-                batch,
-            )?;
+            }
         }
         Kind::Settlement => {
             normalize_settlement(record, role, message_id, received_at, batch)?;
-            normalize_commission(
-                record,
-                role,
-                &order_id,
-                "settled",
-                "receivable",
-                &raw_status,
+            CommissionState {
+                phase: "settled",
+                funding_phase: "receivable",
+                raw_status: &raw_status,
                 source_updated_at,
-                batch,
-            )?;
+            }
         }
-    }
+    };
+    normalize_commission(record, role, &order_id, commission_state, batch)?;
     Ok(())
+}
+
+struct CommissionState<'a> {
+    phase: &'a str,
+    funding_phase: &'a str,
+    raw_status: &'a str,
+    source_updated_at: DateTime<Utc>,
 }
 
 fn normalize_commission(
     record: &Value,
     role: &str,
     order_id: &str,
-    phase: &str,
-    funding_phase: &str,
-    raw_status: &str,
-    source_updated_at: DateTime<Utc>,
+    state: CommissionState<'_>,
     batch: &mut NormalizedBatch,
 ) -> Result<()> {
     let beneficiary = beneficiary_id(record, role);
@@ -302,16 +295,16 @@ fn normalize_commission(
         external_order_line_id: order_id.to_owned(),
         external_beneficiary_id: beneficiary,
         beneficiary_role: role.into(),
-        phase: phase.into(),
-        funding_phase: funding_phase.into(),
+        phase: state.phase.into(),
+        funding_phase: state.funding_phase.into(),
         currency: "CNY".into(),
         gross_minor,
         platform_service_fee_minor,
         special_service_fee_minor: None,
         institution_share_minor,
         net_minor,
-        raw_status: raw_status.into(),
-        source_updated_at,
+        raw_status: state.raw_status.into(),
+        source_updated_at: state.source_updated_at,
         metadata: json!({
             "pid": first_string(record, &["pid", "promotion_id", "position_id"]),
             "source": "douyin_alliance"
