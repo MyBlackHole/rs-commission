@@ -104,21 +104,6 @@ post(
     },
     "e2e-create-rule-v1",
 )
-captured = post(
-    "/orders",
-    ADMIN,
-    {
-        "external_id": "e2e-order-001",
-        "currency": "CNY",
-        "merchant_id": merchant_id,
-        "customer_external_id": None,
-        "paid_minor": "10000",
-        "commission_base_minor": "10000",
-    },
-    "e2e-capture-order-v1",
-)
-order_id = captured["order"]["id"]
-post(f"/orders/{order_id}/release", ADMIN, {}, "e2e-release-order-v1")
 with sync_playwright() as playwright:
     executable = (
         os.environ.get("CONSOLE_BROWSER")
@@ -132,15 +117,49 @@ with sync_playwright() as playwright:
     page_errors: list[str] = []
     page.on("pageerror", lambda error: page_errors.append(str(error)))
 
-    # Admin: use the real order-detail page and post a real refund fact.
+    # Admin: quote with the real server, freeze those inputs, then capture a real paid order.
     page.goto(BASE, wait_until="networkidle")
     expect(page.get_by_role("button", name="安全登录")).to_be_visible(timeout=15000)
     page.locator("input[type=password]").fill(ADMIN)
     page.get_by_role("button", name="安全登录").click()
     expect(page.get_by_text("初始管理员", exact=True)).to_be_visible()
 
-    page.locator("nav").get_by_role("button", name="订单管理", exact=True).click()
+    page.locator("nav").get_by_role("button", name="佣金试算", exact=True).click()
+    capture = page.locator(".order-capture")
+    capture.locator("input").nth(0).fill(merchant_id)
+    capture.locator("input").nth(2).fill("100.00")
+    capture.locator("input").nth(3).fill("100.00")
+    capture.get_by_role("button", name="向服务器试算", exact=True).click()
+    expect(capture.get_by_role("heading", name="试算结果", exact=True)).to_be_visible()
+    expect(
+        capture.locator(".quote-summary article.metric")
+        .filter(has_text="佣金池")
+        .locator("strong")
+    ).to_have_text("¥ 10.00")
+    for index in range(4):
+        expect(capture.locator("input").nth(index)).to_be_disabled()
+
+    capture.get_by_role("textbox", name="订单业务号").fill("e2e-order-001")
+    capture.get_by_role("button", name="校验订单入账请求", exact=True).click()
+    capture.locator(".capture-box input[type=checkbox]").check()
+    capture.get_by_role("button", name="确认订单入账", exact=True).click()
+    expect(capture.get_by_role("button", name="完成并查看订单", exact=True)).to_be_visible()
+    capture.get_by_role("button", name="完成并查看订单", exact=True).click()
     expect(page.get_by_role("heading", name="订单管理", exact=True)).to_be_visible()
+    expect(page.get_by_text("e2e-order-001", exact=True)).to_be_visible()
+
+    orders_page = api("GET", "/orders?limit=50&offset=0", ADMIN)
+    captured = next(
+        item for item in orders_page["items"] if item["external_id"] == "e2e-order-001"
+    )
+    order_id = captured["id"]
+    assert captured["merchant_id"] == merchant_id, captured
+    assert captured["paid_minor"] == "10000", captured
+    assert captured["commission_base_minor"] == "10000", captured
+    assert captured["fee_pool_minor"] == "1000", captured
+    post(f"/orders/{order_id}/release", ADMIN, {}, "e2e-release-order-v1")
+
+    # Continue through the real order-detail page and post a real refund fact.
     page.get_by_role("button", name="查看详情", exact=True).first.click()
     expect(page.get_by_role("heading", name="订单详情", exact=True)).to_be_visible()
     expect(page.get_by_text("e2e-order-001", exact=True)).to_be_visible()
@@ -234,6 +253,10 @@ result = {
     "mode": "real Chromium -> Nginx -> Axum -> PostgreSQL; no API mocks",
     "checks": [
         "real admin authentication",
+        "real server quote through the dedicated UI",
+        "quote inputs frozen before capture",
+        "real paid-order capture through the dedicated UI",
+        "captured order persisted with exact merchant/amount/base",
         "real order list/detail",
         "real refund posting and ledger transaction",
         "refund state persisted in PostgreSQL",

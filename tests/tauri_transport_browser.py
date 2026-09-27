@@ -44,7 +44,7 @@ stub = r'''
      if(args.resource==='payouts') return {items:[{id:payout,external_id:'payout-001',amount_minor:'300',destination_ref:'verified-payee-001',status:'succeeded',provider_reference:'BANK-1',evidence:'核验完成',created_at:'2026-09-25T00:00:00Z',updated_at:'2026-09-25T01:00:00Z'}],has_more:false,offset:0,limit:50};
      return {items:[],has_more:false,offset:0,limit:50};
    }
-   if(command==='quote_commission') return {binding:false,fee_pool_minor:'1000'};
+   if(command==='quote_commission') return {rule:{id,name:'默认规则',version:7},direct_account_id:id,indirect_account_id:null,split:{fee_pool_minor:'1000',merchant_minor:'9000',platform_minor:'700',direct_minor:'300',indirect_minor:'0'},binding:false};
    if(command==='order_detail') { if(args.order!==id) throw 'wrong order handle'; return {order:{id,external_id:'order-001',paid_minor:'10000',refunded_minor:'0',fee_pool_minor:'1000',unlock_at:'2026-10-02T00:00:00Z',rule_snapshot:{}},allocations:[],refunds:[]}; }
    if(command==='payout_detail') { if(args.payout!==payout) throw 'wrong payout handle'; return {id:payout,external_id:'payout-001',amount_minor:'300',destination_ref:'verified-payee-001',status:'succeeded',provider_reference:'BANK-1',evidence:'核验完成',created_at:'2026-09-25T00:00:00Z',updated_at:'2026-09-25T01:00:00Z'}; }
    if(command==='prepare_write') {
@@ -90,8 +90,9 @@ try:
         panel = page.locator("section.panel").first
         panel.locator("input").nth(0).fill("11111111-1111-4111-8111-111111111111")
         page.get_by_role("button", name="向服务器试算").click()
-        expect(panel.locator("pre")).to_contain_text("binding")
+        expect(panel.locator("details pre")).to_contain_text("binding")
         op = page.locator("section.operations")
+        assert op.locator("option", has_text="登记已支付订单").count() == 0
         op.get_by_role("button", name="校验并准备请求").click()
         expect(op.locator("textarea")).to_be_disabled()
         expect(op.get_by_role("button", name="确认提交", exact=True)).to_be_disabled()
