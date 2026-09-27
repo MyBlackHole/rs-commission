@@ -363,9 +363,21 @@ def wait_port_closed(port: int, timeout: float = 10.0) -> None:
     raise RuntimeError(f"port {port} did not close")
 
 
-def start_tauri_driver(data_home: Path, log_name: str):
+def start_tauri_driver(
+    data_home: Path,
+    log_name: str,
+    webview_user_data: Path | None = None,
+):
     env = os.environ.copy()
-    if not WINDOWS:
+    if WINDOWS:
+        if webview_user_data is None:
+            raise RuntimeError("Windows Tauri lifecycle requires explicit WebView2 user data")
+        webview_user_data.mkdir(parents=True, exist_ok=True)
+        # EdgeDriver discovers the Tauri-hosted WebView2 through DevToolsActivePort.
+        # Use the exact same writable UDF for the application runtime and the
+        # ms:edgeOptions.webviewOptions capability so they cannot diverge.
+        env["WEBVIEW2_USER_DATA_FOLDER"] = str(webview_user_data)
+    else:
         env["XDG_DATA_HOME"] = str(data_home)
         env["XDG_CACHE_HOME"] = str(data_home.parent / "cache")
         env.setdefault("GDK_BACKEND", "x11")
@@ -477,10 +489,13 @@ def main() -> None:
         first_client = second_client = None
         killed_pids: list[int] = []
         try:
-            first_process, first_log = start_tauri_driver(data_home, "tauri-driver-first.log")
-            first_client = W3C(
-                webview_user_data=Path(temp) / "webview-first"
+            first_webview_user_data = Path(temp) / "webview-first"
+            first_process, first_log = start_tauri_driver(
+                data_home,
+                "tauri-driver-first.log",
+                first_webview_user_data,
             )
+            first_client = W3C(webview_user_data=first_webview_user_data)
             first_client.start()
             login(first_client, origin)
 
@@ -510,10 +525,13 @@ def main() -> None:
             first_process = first_log = None
             first_client = None
 
-            second_process, second_log = start_tauri_driver(data_home, "tauri-driver-second.log")
-            second_client = W3C(
-                webview_user_data=Path(temp) / "webview-second"
+            second_webview_user_data = Path(temp) / "webview-second"
+            second_process, second_log = start_tauri_driver(
+                data_home,
+                "tauri-driver-second.log",
+                second_webview_user_data,
             )
+            second_client = W3C(webview_user_data=second_webview_user_data)
             second_client.start()
             login(second_client, origin)
 

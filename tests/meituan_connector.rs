@@ -305,10 +305,7 @@ async fn meituan_scroll_sync_uses_child_facts_and_never_posts_ledger(pool: PgPoo
     .fetch_one(&pool)
     .await
     .unwrap();
-    assert_eq!(
-        settled,
-        ("settled".into(), "receivable".into(), Some(180))
-    );
+    assert_eq!(settled, ("settled".into(), "receivable".into(), Some(180)));
 
     let refunded_status: String = sqlx::query_scalar(
         "SELECT normalized_status FROM external_orders

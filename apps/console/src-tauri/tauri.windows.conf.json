@@ -1,0 +1,15 @@
+{
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "分润台",
+        "width": 1280,
+        "height": 850,
+        "minWidth": 360,
+        "minHeight": 600,
+        "create": false
+      }
+    ]
+  }
+}
