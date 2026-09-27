@@ -55,8 +55,26 @@ def api(route):
     elif path == "dashboard":
         data = {"order_count": 12, "paid_minor": "120000", "platform_net_minor": "7200", "available_minor": "111000", "frozen_minor": "9000", "reserved_minor": "0", "unknown_payouts": 0}
     elif path == "quotes":
-        assert json.loads(req.post_data)["paid_minor"] == "10000"
-        data = {"binding": False, "fee_pool_minor": "1000", "platform_minor": "600", "direct_minor": "300", "indirect_minor": "100", "merchant_minor": "9000"}
+        quote_body = json.loads(req.post_data)
+        assert quote_body == {
+            "merchant_id": uid,
+            "customer_external_id": "customer-capture-001",
+            "paid_minor": "12345",
+            "commission_base_minor": "10000",
+        }
+        data = {
+            "rule": {"id": uid, "name": "默认规则", "version": 7},
+            "direct_account_id": uid,
+            "indirect_account_id": None,
+            "split": {
+                "fee_pool_minor": "1000",
+                "merchant_minor": "11345",
+                "platform_minor": "700",
+                "direct_minor": "300",
+                "indirect_minor": "0",
+            },
+            "binding": False,
+        }
     elif path == "orders" and req.method == "GET":
         data = {"items": [{"id": uid, "external_id": "order-001", "merchant_id": uid, "currency": "CNY", "paid_minor": "10000", "commission_base_minor": "10000", "fee_pool_minor": "1000", "refunded_minor": "2500", "rule_id": uid, "rule_snapshot": {"version": 1}, "captured_at": "2026-09-25T00:00:00Z", "unlock_at": "2026-10-02T00:00:00Z", "released_at": None}], "limit": 50, "offset": offset, "has_more": False}
     elif path == f"orders/{uid}" and req.method == "GET":
@@ -74,6 +92,27 @@ def api(route):
         write_attempts[path] = write_attempts.get(path, 0) + 1
         if write_attempts[path] == 1:
             status, data = 503, {"error": {"code": "retryable", "message": "测试：结果未知"}}
+        elif path == "orders":
+            data = {
+                "order": {
+                    "id": uid,
+                    "external_id": "order-capture-002",
+                    "merchant_id": uid,
+                    "customer_external_id": "customer-capture-001",
+                    "currency": "CNY",
+                    "paid_minor": "12345",
+                    "commission_base_minor": "10000",
+                    "fee_pool_minor": "1000",
+                },
+                "allocations": [],
+                "split": {
+                    "fee_pool_minor": "1000",
+                    "merchant_minor": "11345",
+                    "platform_minor": "700",
+                    "direct_minor": "300",
+                    "indirect_minor": "0",
+                },
+            }
         elif path == "payouts":
             data = {"id": payout_id, "external_id": "payout-request-002", "account_id": uid, "amount_minor": "1250", "destination_ref": "verified-payee-002", "status": "requested"}
         elif path.endswith("/refunds"):
@@ -197,13 +236,44 @@ with sync_playwright() as p:
     approve.get_by_role("button", name="完成并刷新提现", exact=True).click()
     expect(page.locator(".payout-detail article.metric").filter(has_text="状态").locator("strong")).to_have_text("已审核")
 
+    # Dedicated quote -> frozen input -> paid-order capture workflow.
     page.locator("nav").get_by_role("button", name="佣金试算", exact=True).click()
-    panel = page.locator("section.panel").first
-    panel.locator("input").nth(0).fill(uid)
-    page.get_by_role("button", name="向服务器试算").click()
-    expect(panel.locator("pre")).to_contain_text("binding")
+    capture = page.locator(".order-capture")
+    capture.locator("input").nth(0).fill(uid)
+    capture.locator("input").nth(1).fill("customer-capture-001")
+    capture.locator("input").nth(2).fill("123.45")
+    capture.locator("input").nth(3).fill("100.00")
+    capture.get_by_role("button", name="向服务器试算", exact=True).click()
+    expect(capture.get_by_role("heading", name="试算结果", exact=True)).to_be_visible()
+    expect(
+        capture.locator(".quote-summary article.metric").filter(has_text="佣金池").locator("strong")
+    ).to_have_text("¥ 10.00")
+    for index in range(4):
+        expect(capture.locator("input").nth(index)).to_be_disabled()
+    capture.locator(".capture-box input").fill("order-capture-002")
+    capture.get_by_role("button", name="校验订单入账请求", exact=True).click()
+    capture.locator(".capture-box input[type=checkbox]").check()
+    capture.get_by_role("button", name="确认订单入账", exact=True).click()
+    expect(capture.get_by_role("button", name="以原幂等键重试", exact=True)).to_be_visible()
+    expect(page.get_by_role("button", name="退出并清除会话")).to_be_disabled()
+    capture.get_by_role("button", name="以原幂等键重试", exact=True).click()
+    expect(capture.get_by_role("button", name="完成并查看订单", exact=True)).to_be_visible()
+    capture_pair = [w for w in writes if w["url"].endswith("/api/v1/orders")]
+    assert len(capture_pair) == 2 and capture_pair[0]["key"] and capture_pair[0] == capture_pair[1]
+    assert json.loads(capture_pair[0]["body"]) == {
+        "external_id": "order-capture-002",
+        "currency": "CNY",
+        "merchant_id": uid,
+        "customer_external_id": "customer-capture-001",
+        "paid_minor": "12345",
+        "commission_base_minor": "10000",
+    }
+    capture.get_by_role("button", name="完成并查看订单", exact=True).click()
+    expect(page.get_by_role("heading", name="订单管理", exact=True)).to_be_visible()
+
     op = page.locator("section.operations")
     expect(op.locator("option", has_text="申请提现")).to_have_count(0)
+    expect(op.locator("option", has_text="登记已支付订单")).to_have_count(0)
     op.get_by_role("button", name="校验并准备请求").click()
     expect(op.locator("textarea")).to_be_disabled()
     expect(op.get_by_role("button", name="确认提交", exact=True)).to_be_disabled()
@@ -272,7 +342,7 @@ with sync_playwright() as p:
     expect(page.get_by_role("button", name="安全登录")).to_be_visible()
 
     assert not errors, errors
-    result = {"tested_ref": os.environ.get("GITHUB_SHA", "local"), "mode": "Chromium, release WASM, mocked API (not backend E2E)", "checks": ["CSP load", "login/logout", "no browser token persistence", "13 data views", "dedicated order detail", "dedicated refund confirmation and same-key retry", "dedicated payout request and same-key retry", "member payout account lock", "unbound member has no editable payout fallback", "dedicated payout detail and same-key approval retry", "generic payout request removed", "pagination advances and reverses offset", "no template expression leakage", "server quote payload", "escaped text", "prepare locks payload", "explicit confirmation", "503 preserves request and prevents logout", "same-key same-body retry", "browser reload restores original pending write without persisting token", "390px responsive width"], "requests": len(requests), "writes": len(writes), "page_errors": errors}
+    result = {"tested_ref": os.environ.get("GITHUB_SHA", "local"), "mode": "Chromium, release WASM, mocked API (not backend E2E)", "checks": ["CSP load", "login/logout", "no browser token persistence", "13 data views", "dedicated order detail", "dedicated refund confirmation and same-key retry", "quote-to-capture frozen-input workflow", "capture same-key same-body retry", "generic capture order removed", "dedicated payout request and same-key retry", "member payout account lock", "unbound member has no editable payout fallback", "dedicated payout detail and same-key approval retry", "generic payout request removed", "pagination advances and reverses offset", "no template expression leakage", "server quote payload", "escaped text", "prepare locks payload", "explicit confirmation", "503 preserves request and prevents logout", "same-key same-body retry", "browser reload restores original pending write without persisting token", "390px responsive width"], "requests": len(requests), "writes": len(writes), "page_errors": errors}
     (OUT / "result.json").write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
     print(json.dumps(result, ensure_ascii=False, indent=2))
     browser.close()
