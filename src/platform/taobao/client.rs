@@ -103,15 +103,8 @@ impl<T> PlatformConnector for TaobaoClient<T> {
     }
 
     fn capabilities(&self) -> &'static [Capability] {
-        const CAPABILITIES: &[Capability] = &[
-            Capability::OrderPull,
-            Capability::RefundPull,
-            Capability::CommissionPull,
-            Capability::SettlementPull,
-            Capability::ProductSearch,
-            Capability::PromotionLink,
-            Capability::PromotionPosition,
-        ];
+        const CAPABILITIES: &[Capability] =
+            &[Capability::OrderPull, Capability::CommissionPull];
         CAPABILITIES
     }
 }
