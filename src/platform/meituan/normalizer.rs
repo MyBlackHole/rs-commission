@@ -229,8 +229,8 @@ fn normalize_detail(
         .or_else(|| clean(detail.order_view_id.as_deref()))
         .map(str::to_owned)
         .unwrap_or_else(|| format!("{}:detail:{}", order.order_id, index + 1));
-    let source_updated_at = optional_time(detail.update_time.as_deref())?
-        .unwrap_or(parent_source_updated_at);
+    let source_updated_at =
+        optional_time(detail.update_time.as_deref())?.unwrap_or(parent_source_updated_at);
     let raw_status = clean(detail.coupon_status.as_deref()).unwrap_or("unknown");
     let refund_minor = money(detail.refund_amount.as_deref())?;
     let commission_reversal_minor = money(detail.refund_fee.as_deref())?;
@@ -307,8 +307,7 @@ fn normalize_detail(
     }
 
     if raw_status == "3" {
-        let settled_at =
-            optional_time(detail.settle_time.as_deref())?.or(Some(source_updated_at));
+        let settled_at = optional_time(detail.settle_time.as_deref())?.or(Some(source_updated_at));
         batch.settlements.push(SettlementObservation {
             external_settlement_id: format!(
                 "{line_id}:settlement:{}",
