@@ -10,6 +10,8 @@ pub enum PlatformError {
     Invalid(String),
     #[error("平台传输失败：{0}")]
     Transport(String),
+    #[error("平台同步检查点已被其他 worker 推进，请重试")]
+    ConcurrentSync,
     #[error("平台返回错误：{0}")]
     Remote(String),
     #[error("平台数据持久化失败")]
