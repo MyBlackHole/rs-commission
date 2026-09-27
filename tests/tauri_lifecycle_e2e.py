@@ -1,9 +1,10 @@
-"""Real Tauri desktop lifecycle E2E on Linux.
+"""Real Tauri desktop lifecycle E2E on Linux and Windows.
 
-This test drives the compiled Tauri binary through tauri-driver/WebKitWebDriver.
-It deliberately SIGKILLs the real application after a 503/unknown write,
-restarts a fresh Tauri process with the same app-data directory, re-authenticates,
-and verifies that the original idempotency key and request body are recovered.
+The same W3C test drives the compiled Tauri binary through tauri-driver and the
+platform-native WebDriver (WebKitWebDriver on Linux, EdgeDriver on Windows).
+It hard-kills the real application after a 503/unknown write, restarts a fresh
+Tauri process with the same app-data directory, re-authenticates, and verifies
+that the original idempotency key and request body are recovered.
 """
 from __future__ import annotations
 
@@ -27,6 +28,8 @@ OUT = Path(os.environ.get("TAURI_LIFECYCLE_OUTPUT", "target/tauri-lifecycle-e2e"
 OUT.mkdir(parents=True, exist_ok=True)
 TOKEN = "tauri-lifecycle-fixture-secret"
 ELEMENT_KEY = "element-6066-11e4-a52e-4f735466cecf"
+WINDOWS = os.name == "nt"
+NATIVE_DRIVER = os.environ.get("TAURI_NATIVE_DRIVER")
 
 
 class FixtureState:
@@ -268,6 +271,29 @@ def wait_tcp(port: int, timeout: float = 15.0) -> None:
 
 
 def app_pids() -> list[int]:
+    if WINDOWS:
+        quoted = str(APP).replace("'", "''")
+        command = (
+            "$target=[System.IO.Path]::GetFullPath('"
+            + quoted
+            + "'); "
+            "Get-CimInstance Win32_Process | "
+            "Where-Object { $_.ExecutablePath -and "
+            "[System.IO.Path]::GetFullPath($_.ExecutablePath) -ieq $target } | "
+            "ForEach-Object { $_.ProcessId }"
+        )
+        completed = subprocess.run(
+            ["powershell", "-NoProfile", "-Command", command],
+            text=True,
+            capture_output=True,
+            check=True,
+        )
+        return [
+            int(line.strip())
+            for line in completed.stdout.splitlines()
+            if line.strip().isdigit()
+        ]
+
     result = []
     me = os.getpid()
     for entry in Path("/proc").iterdir():
@@ -290,32 +316,68 @@ def kill_real_app() -> list[int]:
     if not pids:
         raise RuntimeError("real Tauri application process was not found")
     for pid in pids:
-        try:
-            os.kill(pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
+        if WINDOWS:
+            subprocess.run(
+                ["taskkill", "/PID", str(pid), "/F", "/T"],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+        else:
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
     deadline = time.monotonic() + 10
     while time.monotonic() < deadline and app_pids():
         time.sleep(0.1)
     if app_pids():
-        raise RuntimeError("Tauri application survived SIGKILL")
+        raise RuntimeError("Tauri application survived hard kill")
     return pids
+
+
+def wait_port_closed(port: int, timeout: float = 10.0) -> None:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        with socket.socket() as sock:
+            sock.settimeout(0.2)
+            if sock.connect_ex(("127.0.0.1", port)) != 0:
+                return
+        time.sleep(0.1)
+    raise RuntimeError(f"port {port} did not close")
 
 
 def start_tauri_driver(data_home: Path, log_name: str):
     env = os.environ.copy()
-    env["XDG_DATA_HOME"] = str(data_home)
-    env["XDG_CACHE_HOME"] = str(data_home.parent / "cache")
-    env.setdefault("GDK_BACKEND", "x11")
-    env.setdefault("WEBKIT_DISABLE_COMPOSITING_MODE", "1")
+    if WINDOWS:
+        local_home = data_home.parent / "local"
+        data_home.mkdir(parents=True, exist_ok=True)
+        local_home.mkdir(parents=True, exist_ok=True)
+        env["APPDATA"] = str(data_home)
+        env["LOCALAPPDATA"] = str(local_home)
+    else:
+        env["XDG_DATA_HOME"] = str(data_home)
+        env["XDG_CACHE_HOME"] = str(data_home.parent / "cache")
+        env.setdefault("GDK_BACKEND", "x11")
+        env.setdefault("WEBKIT_DISABLE_COMPOSITING_MODE", "1")
+
+    command = ["tauri-driver", "--port", "4444", "--native-port", "4445"]
+    if NATIVE_DRIVER:
+        command += ["--native-driver", NATIVE_DRIVER]
+
+    popen_args = {
+        "stdout": None,
+        "stderr": subprocess.STDOUT,
+        "env": env,
+    }
+    if WINDOWS:
+        popen_args["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+    else:
+        popen_args["start_new_session"] = True
+
     log = open(OUT / log_name, "wb")
-    process = subprocess.Popen(
-        ["tauri-driver", "--port", "4444", "--native-port", "4445"],
-        stdout=log,
-        stderr=subprocess.STDOUT,
-        env=env,
-        start_new_session=True,
-    )
+    popen_args["stdout"] = log
+    process = subprocess.Popen(command, **popen_args)
     try:
         wait_tcp(4444)
     except Exception:
@@ -328,16 +390,26 @@ def start_tauri_driver(data_home: Path, log_name: str):
 
 def kill_driver(process: subprocess.Popen, log) -> None:
     if process.poll() is None:
-        try:
-            os.killpg(process.pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
+        if WINDOWS:
+            subprocess.run(
+                ["taskkill", "/PID", str(process.pid), "/F", "/T"],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+        else:
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
         try:
             process.wait(timeout=10)
         except subprocess.TimeoutExpired:
             process.kill()
             process.wait(timeout=5)
     log.close()
+    wait_port_closed(4444)
+    wait_port_closed(4445)
 
 
 def login(client: W3C, origin: str) -> None:
@@ -363,7 +435,7 @@ def wait_recovery_files(data_home: Path, expected: int, timeout: float = 10.0) -
 
 
 def main() -> None:
-    if not APP.is_file() or not os.access(APP, os.X_OK):
+    if not APP.is_file():
         raise SystemExit(f"Tauri executable not found: {APP}")
 
     server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), ApiHandler)
@@ -453,7 +525,12 @@ def main() -> None:
 
             result = {
                 "tested_ref": os.environ.get("GITHUB_SHA", "local"),
-                "mode": "real Tauri desktop + tauri-driver/WebKitWebDriver + SIGKILL/restart",
+                "mode": (
+                    "real Tauri desktop + tauri-driver/EdgeDriver + taskkill/restart"
+                    if WINDOWS
+                    else "real Tauri desktop + tauri-driver/WebKitWebDriver + SIGKILL/restart"
+                ),
+                "platform": "windows" if WINDOWS else "linux",
                 "app_processes_killed": len(killed_pids),
                 "first_attempt_unknown": True,
                 "restarted_process_recovered_original_key": True,
