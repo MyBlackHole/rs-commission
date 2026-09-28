@@ -63,6 +63,26 @@ impl From<serde_json::Error> for Error {
         Self::Internal
     }
 }
+impl From<crate::platform::PlatformError> for Error {
+    fn from(value: crate::platform::PlatformError) -> Self {
+        use crate::platform::PlatformError;
+        match value {
+            PlatformError::Invalid(message) => Self::Invalid(message),
+            PlatformError::ConcurrentSync => Self::Busy,
+            PlatformError::Transport(message) | PlatformError::Remote(message) => {
+                tracing::warn!(error = %message, "external platform request failed");
+                Self::Busy
+            }
+            PlatformError::Database(error) => error.into(),
+            PlatformError::Core(error) => error,
+            PlatformError::Json(error) => {
+                tracing::error!(error = %error, "external platform json failed");
+                Self::Internal
+            }
+            PlatformError::Shared(error) => error.into(),
+        }
+    }
+}
 impl IntoResponse for Error {
     fn into_response(self) -> Response {
         let (status, code) = match &self {
