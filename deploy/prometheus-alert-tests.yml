@@ -1,0 +1,288 @@
+rule_files:
+  - prometheus-alerts.yml
+
+evaluation_interval: 1m
+
+tests:
+  - name: operational failures fire the intended alerts
+    interval: 1m
+    input_series:
+      - series: 'up{job="commission",instance="app:9091"}'
+        values: '0+0x20'
+
+      - series: 'commission_http_requests_total{method="GET",route="/api/v1/orders",status="500"}'
+        values: '0+2x20'
+      - series: 'commission_http_requests_total{method="GET",route="/api/v1/orders",status="200"}'
+        values: '0+98x20'
+
+      - series: 'commission_http_request_duration_seconds_bucket{method="GET",route="/api/v1/orders",status="200",le="1.000"}'
+        values: '0+90x20'
+      - series: 'commission_http_request_duration_seconds_bucket{method="GET",route="/api/v1/orders",status="200",le="2.500"}'
+        values: '0+100x20'
+      - series: 'commission_http_request_duration_seconds_bucket{method="GET",route="/api/v1/orders",status="200",le="+Inf"}'
+        values: '0+100x20'
+
+      - series: 'commission_release_worker_enabled'
+        values: '1+0x20'
+      - series: 'commission_release_worker_last_tick_age_seconds'
+        values: '60+1x20'
+      - series: 'commission_release_worker_errors_total'
+        values: '0+1x20'
+
+      - series: 'commission_platform_sync_worker_enabled'
+        values: '1+0x20'
+      - series: 'commission_platform_sync_worker_interval_seconds'
+        values: '60+0x20'
+      - series: 'commission_platform_sync_worker_last_cycle_age_seconds'
+        values: '300+1x20'
+      - series: 'commission_platform_sync_worker_errors_total'
+        values: '0+1x20'
+      - series: 'commission_platform_sync_attempts_total{platform="taobao",outcome="error"}'
+        values: '0+1x20'
+
+      - series: 'commission_outbox_oldest_pending_age_seconds'
+        values: '600+0x20'
+      - series: 'commission_payouts_unknown'
+        values: '1+0x20'
+      - series: 'commission_platform_raw_events{platform="taobao",status="rejected"}'
+        values: '1+0x20'
+      - series: 'commission_platform_raw_event_oldest_age_seconds{platform="meituan",status="pending"}'
+        values: '1800+0x20'
+      - series: 'commission_platform_active_connections{platform="taobao"}'
+        values: '2+0x20'
+      - series: 'commission_platform_connections_with_success{platform="taobao"}'
+        values: '1+0x20'
+      - series: 'commission_db_pool_idle_connections'
+        values: '0+0x20'
+      - series: 'commission_http_requests_in_flight'
+        values: '5+0x20'
+
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: CommissionMetricsTargetDown
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: commission
+              instance: app:9091
+            exp_annotations:
+              summary: commission 内部 metrics 目标不可抓取
+              description: 检查 commissiond 进程、METRICS_BIND_ADDR、数据库快照超时和内部网络；业务 API 端口不会暴露 /metrics。
+
+      - eval_time: 16m
+        alertname: CommissionApiHigh5xxRatio
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: commission API 5xx 比例持续超过 1%
+              description: 先按 X-Request-Id 关联应用日志，再检查数据库和外部平台依赖。
+
+      - eval_time: 16m
+        alertname: CommissionApiP95LatencyHigh
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              route: /api/v1/orders
+            exp_annotations:
+              summary: commission API p95 延迟持续超过 1 秒
+              description: 按 route 检查慢请求，并结合 DB pool、外部平台同步与 PostgreSQL 状态定位。
+
+      - eval_time: 3m
+        alertname: CommissionReleaseWorkerStalled
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+            exp_annotations:
+              summary: 自动解冻 worker 停止推进
+              description: worker 已启用但超过 30 秒没有 tick；检查 Tokio 任务、进程负载和数据库阻塞。
+
+      - eval_time: 5m
+        alertname: CommissionReleaseWorkerErrors
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: 自动解冻 worker 出现错误
+              description: 检查同时间段 automatic release failed 日志；不要通过直接改钱包绕过失败。
+
+      - eval_time: 3m
+        alertname: CommissionPlatformSyncWorkerStalled
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+            exp_annotations:
+              summary: 平台同步 worker 停止推进
+              description: 最近 cycle 已明显超过配置周期；检查 worker 任务是否存活及外部请求是否卡住。
+
+      - eval_time: 5m
+        alertname: CommissionPlatformSyncWorkerErrors
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: 平台同步 worker 顶层查询出现错误
+              description: worker 无法列出连接；优先检查 PostgreSQL 可用性和运行账号权限。
+
+      - eval_time: 5m
+        alertname: CommissionPlatformSyncAttemptsFailing
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              platform: taobao
+            exp_annotations:
+              summary: 外部平台同步出现失败
+              description: 检查对应 platform 的 checkpoint last_error、凭据、签名、限流和上游状态。
+
+      - eval_time: 11m
+        alertname: CommissionOutboxBacklogOld
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: Outbox 最老未投递事件超过 5 分钟
+              description: 检查消费者、lease 和 ACK；不要删除历史事件来消除积压。
+
+      - eval_time: 2m
+        alertname: CommissionPayoutUnknown
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+            exp_annotations:
+              summary: 存在外部结果未知的提现
+              description: 必须核查渠道原交易；不要换业务号或幂等键重新出款。
+
+      - eval_time: 6m
+        alertname: CommissionPlatformRawRejected
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              platform: taobao
+              status: rejected
+            exp_annotations:
+              summary: 平台 RawEvent 持续存在 rejected
+              description: 检查平台字段变化、状态映射和 normalizer；保留原始事件用于追溯。
+
+      - eval_time: 11m
+        alertname: CommissionPlatformRawPendingOld
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              platform: meituan
+              status: pending
+            exp_annotations:
+              summary: 平台 RawEvent pending 超过 15 分钟
+              description: 检查同步/normalizer 是否继续推进以及 checkpoint 是否停滞。
+
+      - eval_time: 11m
+        alertname: CommissionPlatformConnectionNeverSynced
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              platform: taobao
+            exp_annotations:
+              summary: 存在从未成功同步的平台连接
+              description: 检查连接凭据和 checkpoint；新建连接的初次同步也会短暂触发该条件。
+
+      - eval_time: 3m
+        alertname: CommissionDbPoolSaturated
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: PostgreSQL 连接池持续无空闲连接
+              description: 检查慢 SQL、锁等待和请求并发；不要仅通过盲目扩大连接池掩盖问题。
+
+  - name: healthy signals do not fire operational alerts
+    interval: 1m
+    input_series:
+      - series: 'up{job="commission",instance="app:9091"}'
+        values: '1+0x20'
+
+      - series: 'commission_http_requests_total{method="GET",route="/api/v1/orders",status="200"}'
+        values: '0+100x20'
+      - series: 'commission_http_request_duration_seconds_bucket{method="GET",route="/api/v1/orders",status="200",le="1.000"}'
+        values: '0+100x20'
+      - series: 'commission_http_request_duration_seconds_bucket{method="GET",route="/api/v1/orders",status="200",le="2.500"}'
+        values: '0+100x20'
+      - series: 'commission_http_request_duration_seconds_bucket{method="GET",route="/api/v1/orders",status="200",le="+Inf"}'
+        values: '0+100x20'
+
+      - series: 'commission_release_worker_enabled'
+        values: '1+0x20'
+      - series: 'commission_release_worker_last_tick_age_seconds'
+        values: '5+0x20'
+      - series: 'commission_release_worker_errors_total'
+        values: '0+0x20'
+
+      - series: 'commission_platform_sync_worker_enabled'
+        values: '1+0x20'
+      - series: 'commission_platform_sync_worker_interval_seconds'
+        values: '60+0x20'
+      - series: 'commission_platform_sync_worker_last_cycle_age_seconds'
+        values: '30+0x20'
+      - series: 'commission_platform_sync_worker_errors_total'
+        values: '0+0x20'
+      - series: 'commission_platform_sync_attempts_total{platform="taobao",outcome="error"}'
+        values: '0+0x20'
+
+      - series: 'commission_outbox_oldest_pending_age_seconds'
+        values: '30+0x20'
+      - series: 'commission_payouts_unknown'
+        values: '0+0x20'
+      - series: 'commission_platform_raw_events{platform="taobao",status="rejected"}'
+        values: '0+0x20'
+      - series: 'commission_platform_raw_event_oldest_age_seconds{platform="meituan",status="pending"}'
+        values: '60+0x20'
+      - series: 'commission_platform_active_connections{platform="taobao"}'
+        values: '2+0x20'
+      - series: 'commission_platform_connections_with_success{platform="taobao"}'
+        values: '2+0x20'
+      - series: 'commission_db_pool_idle_connections'
+        values: '5+0x20'
+      - series: 'commission_http_requests_in_flight'
+        values: '2+0x20'
+
+    alert_rule_test:
+      - eval_time: 16m
+        alertname: CommissionMetricsTargetDown
+        exp_alerts: []
+      - eval_time: 16m
+        alertname: CommissionApiHigh5xxRatio
+        exp_alerts: []
+      - eval_time: 16m
+        alertname: CommissionApiP95LatencyHigh
+        exp_alerts: []
+      - eval_time: 16m
+        alertname: CommissionReleaseWorkerStalled
+        exp_alerts: []
+      - eval_time: 16m
+        alertname: CommissionReleaseWorkerErrors
+        exp_alerts: []
+      - eval_time: 16m
+        alertname: CommissionPlatformSyncWorkerStalled
+        exp_alerts: []
+      - eval_time: 16m
+        alertname: CommissionPlatformSyncWorkerErrors
+        exp_alerts: []
+      - eval_time: 16m
+        alertname: CommissionPlatformSyncAttemptsFailing
+        exp_alerts: []
+      - eval_time: 16m
+        alertname: CommissionOutboxBacklogOld
+        exp_alerts: []
+      - eval_time: 16m
+        alertname: CommissionPayoutUnknown
+        exp_alerts: []
+      - eval_time: 16m
+        alertname: CommissionPlatformRawRejected
+        exp_alerts: []
+      - eval_time: 16m
+        alertname: CommissionPlatformRawPendingOld
+        exp_alerts: []
+      - eval_time: 16m
+        alertname: CommissionPlatformConnectionNeverSynced
+        exp_alerts: []
+      - eval_time: 16m
+        alertname: CommissionDbPoolSaturated
+        exp_alerts: []
