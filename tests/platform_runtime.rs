@@ -152,7 +152,6 @@ async fn connection_status_requires_auth_and_never_exposes_secret_reference(pool
     assert!(!encoded.contains("SHOULD_NOT_LEAK"));
 }
 
-
 #[sqlx::test(migrations = "./migrations")]
 async fn pull_sync_configuration_failure_is_visible_in_checkpoint(pool: PgPool) {
     let connection_id = Uuid::new_v4();
@@ -193,7 +192,6 @@ async fn pull_sync_configuration_failure_is_visible_in_checkpoint(pool: PgPool) 
         .as_deref()
         .is_some_and(|message| message.contains("未配置")));
 }
-
 
 #[sqlx::test(migrations = "./migrations")]
 async fn connection_management_is_idempotent_and_revocation_is_terminal(pool: PgPool) {
