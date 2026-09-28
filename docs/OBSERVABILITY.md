@@ -1,6 +1,6 @@
 # 可观测性
 
-后端 `commissiond` 使用结构化 JSON tracing，并提供 Prometheus text exposition 的 `GET /metrics`。目标是让运行问题能通过低基数信号被发现，而不是把业务标识、请求体或令牌塞进指标标签。
+后端 `commissiond` 使用结构化 JSON tracing，并在独立内部监听器提供 Prometheus text exposition 的 `GET /metrics`。目标是让运行问题能通过低基数信号被发现，而不是把业务标识、请求体或令牌塞进指标标签。
 
 ## 请求关联
 
@@ -16,9 +16,9 @@
 
 ## Metrics
 
-`/metrics` 不属于公开业务 API。Compose 默认只把后端暴露在本机 `127.0.0.1:8081`，生产部署应由 Prometheus/采集器从内部网络抓取，不要把该路径通过公网网关转发。
+`/metrics` 不属于公开业务 API，也不注册在 `BIND_ADDR` 的业务 Router 上。`commissiond` 使用 `METRICS_BIND_ADDR` 单独监听，非 Docker 默认 `127.0.0.1:9091`；Compose 内设置为 `0.0.0.0:9091`，但不发布这个端口到宿主机，只允许 Compose 内部网络访问。即使直接访问业务端口的 `/metrics` 也只会得到 404。
 
-建议抓取周期 15–60 秒。
+每次抓取数据库业务状态最多等待 3 秒；超时返回失败 scrape，Prometheus 的 `up{job="commission"}` 会变为 0，避免监控查询在数据库异常时长期占住请求。建议抓取周期 15–60 秒。
 
 ### HTTP
 
@@ -98,7 +98,7 @@ PR #27 的真实平台 Runtime 也纳入进程指标：
 - `commission_platform_sync_attempts_total{platform,outcome}`
 - `commission_platform_sync_duration_seconds_bucket{platform,outcome,le}`
 
-`platform` 只允许 taobao/douyin/meituan/other，`outcome` 只允许 success/error，因此不会因 connection id 或外部订单号制造高基数。周期 worker 的 liveness 与单个平台的请求失败可以分别告警。
+`platform` 只允许 taobao/douyin/meituan/other，`outcome` 只允许 success/error，因此不会因 connection id 或外部订单号制造高基数。周期 worker 的 liveness 与单个平台的请求失败可以分别告警。平台 pull 与抖音 webhook 的常规日志也只记录 observation/duplicate 等计数摘要，不打印完整 outcome、cursor 或 raw-event 标识。
 
 ## Prometheus 与告警
 
@@ -108,9 +108,9 @@ PR #27 的真实平台 Runtime 也纳入进程指标：
 docker compose --profile observability up --build
 ```
 
-Prometheus 仅绑定 `127.0.0.1:9090`，从 Compose 内部网络抓取 `app:8080/metrics`。console Nginx 对 `/metrics` 显式返回 404，防止以后路由调整时误把内部指标暴露到公网入口。
+Prometheus UI 仅绑定 `127.0.0.1:9090`，从 Compose 内部网络抓取独立的 `app:9091/metrics`。业务 API 端口 `app:8080` 不注册该路由，console Nginx 也对 `/metrics` 显式返回 404，形成两层隔离。
 
-规则文件覆盖 HTTP 5xx/p95、release worker 停滞和错误、平台 worker 停滞/错误/同步失败、Outbox 积压、unknown payout、RawEvent pending/rejected、从未成功同步的连接和 DB pool 持续耗尽。CI 使用 Prometheus 3.15.0 的 `promtool` 同时校验 scrape 配置与 rules。
+规则文件覆盖 metrics target down、HTTP 5xx/p95、release worker 停滞和错误、平台 worker 停滞/错误/同步失败、Outbox 积压、unknown payout、RawEvent pending/rejected、从未成功同步的连接和 DB pool 持续耗尽。CI 使用 Prometheus 3.15.0 的 `promtool` 同时校验 scrape 配置与 rules。
 
 生产仍应由独立 Prometheus 抓取，并接入 Alertmanager/现有告警平台；仓库不预置邮件、IM webhook 等通知秘密。
 

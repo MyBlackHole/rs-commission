@@ -131,7 +131,7 @@ jobs:
           with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as env:
               env.write(f"ADMIN_TOKEN={token}\n")
           PY
-          nohup env BIND_ADDR=127.0.0.1:8081 RELEASE_WORKER=false \
+          nohup env BIND_ADDR=127.0.0.1:8081 METRICS_BIND_ADDR=127.0.0.1:8091 RELEASE_WORKER=false \
             target/debug/commissiond serve >/tmp/commission-e2e-api.log 2>&1 &
           echo $! >/tmp/commission-e2e-api.pid
           for _ in $(seq 1 60); do
@@ -141,6 +141,11 @@ jobs:
             sleep 1
           done
           curl --fail http://127.0.0.1:8081/health/ready
+          curl --fail http://127.0.0.1:8091/metrics | grep -q commission_uptime_seconds
+          if curl --silent --fail http://127.0.0.1:8081/metrics >/dev/null; then
+            echo "public API unexpectedly exposes /metrics" >&2
+            exit 1
+          fi
       - name: Prepare real browser gateway
         run: |
           python3 -m pip install playwright==1.57.0

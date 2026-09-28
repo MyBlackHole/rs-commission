@@ -256,12 +256,31 @@ pub async fn run_pull_cycle(pool: &PgPool, now: DateTime<Utc>) {
                         || outcome
                             .get("next_cursor")
                             .is_some_and(|value| !value.is_null());
+                    let order_observations = outcome
+                        .get("order_observations")
+                        .and_then(Value::as_u64)
+                        .unwrap_or(0);
+                    let commission_observations = outcome
+                        .get("commission_observations")
+                        .and_then(Value::as_u64)
+                        .unwrap_or(0);
+                    let refund_observations = outcome
+                        .get("refund_observations")
+                        .and_then(Value::as_u64)
+                        .unwrap_or(0);
+                    let settlement_observations = outcome
+                        .get("settlement_observations")
+                        .and_then(Value::as_u64)
+                        .unwrap_or(0);
                     tracing::info!(
                         %connection_id,
                         %platform,
                         page,
                         has_more,
-                        outcome = %outcome,
+                        order_observations,
+                        commission_observations,
+                        refund_observations,
+                        settlement_observations,
                         "platform pull sync completed"
                     );
                     if !has_more {

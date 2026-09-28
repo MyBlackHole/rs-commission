@@ -1,6 +1,15 @@
 groups:
   - name: commission
     rules:
+      - alert: CommissionMetricsTargetDown
+        expr: up{job="commission"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: commission 内部 metrics 目标不可抓取
+          description: 检查 commissiond 进程、METRICS_BIND_ADDR、数据库快照超时和内部网络；业务 API 端口不会暴露 /metrics。
+
       - alert: CommissionApiHigh5xxRatio
         expr: |
           (

@@ -104,7 +104,6 @@ pub fn router(state: AppState) -> Router {
         .route("/", get(index))
         .route("/health/live", get(|| async { Json(json!({"status":"alive"})) }))
         .route("/health/ready", get(ready))
-        .route("/metrics", get(observability::metrics))
         .route(
             "/webhooks/douyin/{id}",
             post(douyin_webhook).layer(DefaultBodyLimit::max(1024 * 1024)),
@@ -335,7 +334,45 @@ async fn douyin_webhook(
     .await
     .map_err(|_| Error::Busy)??;
 
-    tracing::info!(connection_id = %id, outcome = %outcome, "douyin webhook accepted");
+    let raw_events = outcome
+        .get("raw_events")
+        .and_then(|value| value.as_u64())
+        .unwrap_or(0);
+    let duplicates = outcome
+        .get("duplicates")
+        .and_then(|value| value.as_u64())
+        .unwrap_or(0);
+    let order_observations = outcome
+        .get("order_observations")
+        .and_then(|value| value.as_u64())
+        .unwrap_or(0);
+    let commission_observations = outcome
+        .get("commission_observations")
+        .and_then(|value| value.as_u64())
+        .unwrap_or(0);
+    let refund_observations = outcome
+        .get("refund_observations")
+        .and_then(|value| value.as_u64())
+        .unwrap_or(0);
+    let settlement_observations = outcome
+        .get("settlement_observations")
+        .and_then(|value| value.as_u64())
+        .unwrap_or(0);
+    let ignored_messages = outcome
+        .get("ignored_messages")
+        .and_then(|value| value.as_u64())
+        .unwrap_or(0);
+    tracing::info!(
+        connection_id = %id,
+        raw_events,
+        duplicates,
+        order_observations,
+        commission_observations,
+        refund_observations,
+        settlement_observations,
+        ignored_messages,
+        "douyin webhook accepted"
+    );
     Ok(Json(json!({"code": 0, "msg": "success"})))
 }
 
