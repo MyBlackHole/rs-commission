@@ -89,7 +89,7 @@ async fn metrics_surface_request_and_operational_signals(pool: PgPool) {
         std::time::Duration::from_millis(250),
     );
 
-    let app = http::router(AppState { pool });
+    let app = http::router(AppState { pool: pool.clone() });
 
     let supplied = Uuid::new_v4();
     let live = get(&app, "/health/live", Some(&supplied.to_string())).await;
@@ -114,7 +114,11 @@ async fn metrics_surface_request_and_operational_signals(pool: PgPool) {
     assert!(Uuid::parse_str(generated_id).is_ok());
     assert_ne!(generated_id, "not-a-uuid");
 
-    let metrics = get(&app, "/metrics", None).await;
+    let public_metrics = get(&app, "/metrics", None).await;
+    assert_eq!(public_metrics.status(), StatusCode::NOT_FOUND);
+
+    let metrics_app = observability::router(AppState { pool });
+    let metrics = get(&metrics_app, "/metrics", None).await;
     assert_eq!(metrics.status(), StatusCode::OK);
     assert!(metrics
         .headers()
