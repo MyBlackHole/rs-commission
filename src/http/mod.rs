@@ -4,7 +4,11 @@ use crate::{
     model::*,
     observability,
     platform::runtime as platform_runtime,
-    service::{catalog, orders, outbox, payouts, queries},
+    service::{
+        catalog, orders, outbox, payouts,
+        platforms::{self, CreatePlatformConnection, SetPlatformConnectionStatus},
+        queries,
+    },
     AppState,
 };
 use axum::{
@@ -78,7 +82,14 @@ pub fn router(state: AppState) -> Router {
         .route("/outbox", get(list_outbox))
         .route("/outbox/claim", post(claim_outbox))
         .route("/outbox/{id}/ack", post(ack_outbox))
-        .route("/platform/connections", get(platform_connections))
+        .route(
+            "/platform/connections",
+            get(platform_connections).post(create_platform_connection),
+        )
+        .route(
+            "/platform/connections/{id}/status",
+            post(set_platform_connection_status),
+        )
         .route("/platform/connections/{id}/sync", post(platform_sync))
         .route(
             "/platform/connections/{id}/reconcile",
@@ -333,4 +344,27 @@ async fn douyin_webhook(
 
     tracing::info!(connection_id = %id, outcome = %outcome, "douyin webhook accepted");
     Ok(Json(json!({"code": 0, "msg": "success"})))
+}
+
+async fn create_platform_connection(
+    State(s): State<AppState>,
+    Extension(a): Extension<Actor>,
+    headers: HeaderMap,
+    ApiJson(input): ApiJson<CreatePlatformConnection>,
+) -> Result<Json<Value>> {
+    Ok(Json(
+        platforms::create_connection(&s.pool, &a, key(&headers)?, input).await?,
+    ))
+}
+
+async fn set_platform_connection_status(
+    State(s): State<AppState>,
+    Extension(a): Extension<Actor>,
+    Path(id): Path<Uuid>,
+    headers: HeaderMap,
+    ApiJson(input): ApiJson<SetPlatformConnectionStatus>,
+) -> Result<Json<Value>> {
+    Ok(Json(
+        platforms::set_connection_status(&s.pool, &a, key(&headers)?, id, input).await?,
+    ))
 }
