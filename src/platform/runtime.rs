@@ -62,9 +62,13 @@ pub async fn list_connections(pool: &PgPool) -> Result<Value> {
                 count(cp.stream)::bigint,
                 max(cp.last_attempt_at),
                 max(cp.last_success_at),
-                CASE WHEN count(*) FILTER (WHERE cp.last_error IS NOT NULL) = 0 THEN NULL
-                     ELSE max(cp.last_error)
-                END
+                (
+                    SELECT cp2.last_error
+                    FROM platform_sync_checkpoints cp2
+                    WHERE cp2.connection_id=c.id AND cp2.last_error IS NOT NULL
+                    ORDER BY cp2.updated_at DESC,cp2.stream
+                    LIMIT 1
+                )
          FROM platform_connections c
          LEFT JOIN platform_sync_checkpoints cp ON cp.connection_id=c.id
          GROUP BY c.id,c.platform,c.external_account_id,c.display_name,c.connection_type,c.status,
@@ -122,12 +126,16 @@ pub async fn sync_pull_connection(
     let result = match connection.platform.as_str() {
         "taobao" => sync_taobao(pool, &connection, now).await,
         "meituan" => sync_meituan(pool, &connection, now).await,
-        "douyin" => Err(PlatformError::invalid(
-            "抖音连接通过 webhook 实时接入；漏单补偿请使用 reconcile 入口",
-        )),
-        other => Err(PlatformError::invalid(format!(
-            "不支持的平台运行时：{other}"
-        ))),
+        "douyin" => {
+            return Err(PlatformError::invalid(
+                "抖音连接通过 webhook 实时接入；漏单补偿请使用 reconcile 入口",
+            ));
+        }
+        other => {
+            return Err(PlatformError::invalid(format!(
+                "不支持的平台运行时：{other}"
+            )));
+        }
     };
 
     if let Err(error) = &result {
@@ -236,22 +244,36 @@ pub async fn run_pull_cycle(pool: &PgPool, now: DateTime<Utc>) {
     };
 
     for (connection_id, platform) in rows {
-        match sync_pull_connection(pool, connection_id, now).await {
-            Ok(outcome) => {
-                tracing::info!(
-                    %connection_id,
-                    %platform,
-                    outcome = %outcome,
-                    "platform pull sync completed"
-                );
-            }
-            Err(error) => {
-                tracing::error!(
-                    %connection_id,
-                    %platform,
-                    %error,
-                    "platform pull sync failed"
-                );
+        for page in 1..=32 {
+            match sync_pull_connection(pool, connection_id, now).await {
+                Ok(outcome) => {
+                    let has_more = outcome
+                        .get("has_next")
+                        .and_then(Value::as_bool)
+                        .unwrap_or(false)
+                        || outcome.get("next_cursor").is_some_and(|value| !value.is_null());
+                    tracing::info!(
+                        %connection_id,
+                        %platform,
+                        page,
+                        has_more,
+                        outcome = %outcome,
+                        "platform pull sync completed"
+                    );
+                    if !has_more {
+                        break;
+                    }
+                }
+                Err(error) => {
+                    tracing::error!(
+                        %connection_id,
+                        %platform,
+                        page,
+                        %error,
+                        "platform pull sync failed"
+                    );
+                    break;
+                }
             }
         }
     }
