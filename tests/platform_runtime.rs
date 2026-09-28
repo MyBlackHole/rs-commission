@@ -194,3 +194,107 @@ async fn pull_sync_configuration_failure_is_visible_in_checkpoint(pool: PgPool) 
         .as_deref()
         .is_some_and(|message| message.contains("未配置")));
 }
+
+
+#[sqlx::test(migrations = "./migrations")]
+async fn connection_management_is_idempotent_and_revocation_is_terminal(pool: PgPool) {
+    let admin = auth::bootstrap(&pool).await.unwrap()["secret"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let app = http::router(AppState { pool: pool.clone() });
+
+    let create_body = r#"{
+      "platform":"meituan",
+      "external_account_id":"meituan-runtime",
+      "display_name":"运行时美团",
+      "connection_type":"app_credentials",
+      "credential_ref":"env:MEITUAN_RUNTIME",
+      "settlement_owner_account_id":null
+    }"#;
+
+    let create = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/platform/connections")
+                .header("authorization", format!("Bearer {admin}"))
+                .header("content-type", "application/json")
+                .header("idempotency-key", "platform-create-runtime-001")
+                .body(Body::from(create_body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(create.status(), StatusCode::OK);
+    let created = body_json(create).await;
+    let id = Uuid::parse_str(created["id"].as_str().unwrap()).unwrap();
+    assert_eq!(created["credential_configured"], true);
+    assert!(serde_json::to_string(&created)
+        .unwrap()
+        .find("MEITUAN_RUNTIME")
+        .is_none());
+
+    let replay = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/platform/connections")
+                .header("authorization", format!("Bearer {admin}"))
+                .header("content-type", "application/json")
+                .header("idempotency-key", "platform-create-runtime-001")
+                .body(Body::from(create_body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(replay.status(), StatusCode::OK);
+    assert_eq!(body_json(replay).await["id"], created["id"]);
+
+    for (key, status) in [
+        ("platform-status-suspend-001", "suspended"),
+        ("platform-status-revoke-001", "revoked"),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/api/v1/platform/connections/{id}/status"))
+                    .header("authorization", format!("Bearer {admin}"))
+                    .header("content-type", "application/json")
+                    .header("idempotency-key", key)
+                    .body(Body::from(format!(r#"{{"status":"{status}"}}"#)))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(body_json(response).await["status"], status);
+    }
+
+    let reactivate = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/api/v1/platform/connections/{id}/status"))
+                .header("authorization", format!("Bearer {admin}"))
+                .header("content-type", "application/json")
+                .header("idempotency-key", "platform-status-reactivate-001")
+                .body(Body::from(r#"{"status":"active"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(reactivate.status(), StatusCode::CONFLICT);
+
+    let stored_ref: String =
+        sqlx::query_scalar("SELECT credential_ref FROM platform_connections WHERE id=$1")
+            .bind(id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(stored_ref, "env:MEITUAN_RUNTIME");
+}
