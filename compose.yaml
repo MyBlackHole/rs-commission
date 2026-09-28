@@ -26,6 +26,7 @@ services:
     environment:
       DATABASE_URL: postgres://commission:${POSTGRES_PASSWORD}@db:5432/commission
       BIND_ADDR: 0.0.0.0:8080
+      METRICS_BIND_ADDR: 0.0.0.0:9091
       RELEASE_WORKER: 'true'
       PLATFORM_SYNC_WORKER: 'false'
       PLATFORM_SYNC_INTERVAL_SECONDS: '60'
