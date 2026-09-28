@@ -152,3 +152,45 @@ async fn connection_status_requires_auth_and_never_exposes_secret_reference(pool
     assert!(!encoded.contains("credential_ref"));
     assert!(!encoded.contains("SHOULD_NOT_LEAK"));
 }
+
+
+#[sqlx::test(migrations = "./migrations")]
+async fn pull_sync_configuration_failure_is_visible_in_checkpoint(pool: PgPool) {
+    let connection_id = Uuid::new_v4();
+    let missing = format!("env:RS_COMMISSION_MISSING_{}", connection_id.simple());
+    sqlx::query(
+        "INSERT INTO platform_connections
+         (id,platform,external_account_id,display_name,connection_type,credential_ref)
+         VALUES($1,'taobao','publisher-missing','缺失凭据','app_credentials',$2)",
+    )
+    .bind(connection_id)
+    .bind(&missing)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let error = commission::platform::runtime::sync_pull_connection(
+        &pool,
+        connection_id,
+        chrono::Utc::now(),
+    )
+    .await
+    .unwrap_err();
+    assert!(error.to_string().contains("未配置"));
+
+    let checkpoint: (Option<chrono::DateTime<chrono::Utc>>, Option<String>) = sqlx::query_as(
+        "SELECT last_attempt_at,last_error
+         FROM platform_sync_checkpoints
+         WHERE connection_id=$1 AND stream='taobao_order_updated'",
+    )
+    .bind(connection_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    assert!(checkpoint.0.is_some());
+    assert!(checkpoint
+        .1
+        .as_deref()
+        .is_some_and(|message| message.contains("未配置")));
+}
