@@ -288,6 +288,11 @@ jobs:
           docker run --rm --entrypoint /bin/promtool \
             -v "$PWD/deploy/prometheus-alerts.yml:/work/prometheus-alerts.yml:ro" \
             prom/prometheus:v3.15.0 check rules /work/prometheus-alerts.yml
+      - name: Test Prometheus alert semantics
+        run: |
+          docker run --rm --entrypoint /bin/promtool -w /work \
+            -v "$PWD/deploy:/work:ro" \
+            prom/prometheus:v3.15.0 test rules /work/prometheus-alert-tests.yml
       - name: Validate observability Compose profile
         run: POSTGRES_PASSWORD=ci docker compose --profile observability config >/dev/null
   format:
