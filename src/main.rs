@@ -1,4 +1,4 @@
-use commission::{auth, http, service::orders, AppState, MIGRATOR};
+use commission::{auth, http, observability, service::orders, AppState, MIGRATOR};
 use sqlx::postgres::PgPoolOptions;
 use std::{env, error::Error, time::Duration};
 use tokio::sync::watch;
@@ -64,12 +64,17 @@ async fn main() -> Result<(), Box<dyn Error>> {
             tokio::select! {
                 _ = worker_shutdown.changed() => break,
                 _ = interval.tick() => {
+                    observability::release_worker_tick();
                     for _ in 0..32 {
                         if *worker_shutdown.borrow() { return; }
                         match orders::release_one_due(&worker_pool).await {
-                            Ok(true) => {},
+                            Ok(true) => observability::release_worker_released(),
                             Ok(false) => break,
-                            Err(error) => { tracing::error!(%error,"automatic release failed"); break; }
+                            Err(error) => {
+                                observability::release_worker_error();
+                                tracing::error!(%error, "automatic release failed");
+                                break;
+                            }
                         }
                     }
                 }
@@ -83,11 +88,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
     axum::serve(listener, app)
         .with_graceful_shutdown(async move {
             shutdown_signal().await;
+            tracing::info!("shutdown signal received");
             let _ = shutdown_tx.send(true);
         })
         .await?;
     worker.await?;
     pool.close().await;
+    tracing::info!("commission server stopped");
     Ok(())
 }
 
