@@ -58,8 +58,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let platform_enabled =
         env::var("PLATFORM_SYNC_WORKER").unwrap_or_else(|_| "false".into()) == "true";
     let platform_interval_seconds = env_seconds("PLATFORM_SYNC_INTERVAL_SECONDS", 60, 10, 3600)?;
-    let metrics_bind =
-        env::var("METRICS_BIND_ADDR").unwrap_or_else(|_| "127.0.0.1:9091".into());
+    let metrics_bind = env::var("METRICS_BIND_ADDR").unwrap_or_else(|_| "127.0.0.1:9091".into());
     observability::configure_workers(release_enabled, platform_enabled, platform_interval_seconds);
 
     let worker_pool = pool.clone();
