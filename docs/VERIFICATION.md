@@ -17,7 +17,7 @@
 | 浏览器夹具 | Chromium 加载 release WASM，在部署 CSP 下运行 HTTP API 夹具回归 |
 | 真实 Web E2E | Chromium → Nginx 同源入口 → Axum → PostgreSQL；真实试算、订单入账/详情/退款、提现申请/详情/审核，不 mock API |
 | IPC 传输 | Chromium 加载 tauri-feature release WASM，使用十个限定本地命令夹具验证 JSON 编码、句柄、恢复查询、503 解码和重试；不是 Tauri 真实运行时 |
-| Tauri 生命周期 | Linux 上用真实 commission-shell + tauri-driver/WebKitWebDriver；503 后 SIGKILL 宿主，启动新进程、重新登录并恢复原 path/body/idempotency key |
+| Tauri 生命周期 | Linux：真实 commission-shell + tauri-driver/WebKitWebDriver + SIGKILL；Windows：真实 commission-shell + tauri-driver/匹配 WebView2 Runtime 的 EdgeDriver + taskkill。两者均验证 503 后新进程重认证并恢复原 path/body/idempotency key |
 | 桌面 | Windows/macOS/Linux 上执行 SDK 测试、cargo build 链接 Tauri 并嵌入 Leptos 资源、后端 cargo check |
 
 原生桥测试覆盖会话隔离、令牌不返回 UI、未知结果不能覆盖/丢弃/切换账号、同键同体重试、已知结果在 IPC 丢失后缓存重放、资源白名单和角色限制；新增用临时恢复文件重建 NativeBridge，验证 503 后进程重建仍以完全相同请求重试。服务器仍执行最终授权。
@@ -36,21 +36,21 @@
 
 首轮 `081cf44` 的 40 个 Rust 测试和 Web 构建/既有回归通过，但截图人工复核发现分页按钮把未加花括号的 >= 表达式解析成文本；因此首轮的成功不作为 UI 完成证明。已将该属性表达式显式包裹，并补充下一页/上一页实际请求断言。普通资源页采用稳定 Show 分支，避免切换列表时重建整个 ReadPanel。
 
-tests/tauri_transport_browser.py 覆盖 tauri-feature WASM 与 IPC 编码夹具；tests/tauri_lifecycle_e2e.py 则通过 tauri-driver 2.0.6 + WebKitWebDriver 驱动真实 Linux Tauri 窗口，显式 SIGKILL commission-shell 后启动全新进程，验证 app-data 恢复、同 key/body 重试、bearer 不落恢复文件以及解决后删除恢复文件。Python/夹具 JavaScript 只作测试工具。
+tests/tauri_transport_browser.py 覆盖 tauri-feature WASM 与 IPC 编码夹具；tests/tauri_lifecycle_e2e.py 同时覆盖真实 Linux 与 Windows Tauri 生命周期：Linux 使用 tauri-driver 2.0.6 + WebKitWebDriver + SIGKILL；Windows 使用匹配 WebView2 Runtime 的 EdgeDriver + taskkill。两端都验证 app-data/业务恢复目录重建、同 path/key/body 重试、bearer 不落恢复文件以及解决后删除恢复文件。Windows 早期 CI 因 Wry 覆盖 EdgeDriver 注入的 WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS 而无法生成 DevToolsActivePort；PR #23 仅在 Windows WebDriver 环境下把 remote-debugging 参数合并进 Wry 默认 browser args 后，真实 hard-kill/restart 路径通过。Python/夹具 JavaScript 只作测试工具。
 
 ## 证据获取
 
-核心迁移基线见 PR #1；真实 Tauri 生命周期恢复见 PR #8 / Actions run 36280126043；外部平台接入数据域见 PR #15；淘宝联盟订单同步第一阶段见 PR #17。
+核心迁移基线见 PR #1；Linux 真实 Tauri 生命周期恢复见 PR #8 / Actions run 36280126043；Windows WebView2 真实强杀/重启恢复见 PR #23 / Actions run 36354315840；外部平台接入数据域见 PR #15；淘宝联盟订单同步第一阶段见 PR #17；美团联盟订单同步第一阶段见 PR #22。
 
-CI 产物包括 rs-commission-source、commission-console-web、commission-console-tauri-assets、browser-qa、real-stack-e2e 和 tauri-lifecycle-e2e。tauri-lifecycle-e2e 保存两阶段 driver 日志与去敏 result.json；GITHUB_SHA 在 PR CI 中可能是合并测试提交，不代表已合并 main。
+CI 产物包括 rs-commission-source、commission-console-web、commission-console-tauri-assets、browser-qa、real-stack-e2e、tauri-lifecycle-e2e 和 tauri-lifecycle-windows。两个生命周期产物都保存两阶段 driver 日志与去敏 result.json；Windows run 36354315840 的结果确认 app_processes_killed=1、restarted_process_recovered_original_key=true、same_path_key_body_after_restart=true、bearer_absent_from_recovery_file=true、recovery_file_removed_after_resolution=true。GITHUB_SHA 在 PR CI 中可能是合并测试提交，不代表已合并 main。
 
 本次本地 Chromium 访问回环 HTTP 被环境管理员策略阻止，未将本地尝试列为成功；浏览器实际验证使用 GitHub Actions runner，不修改或绕过本地浏览器策略。
 
 ## 尚未覆盖 / 不可据此上线
 
-Android/iOS 编译、模拟器/真机、移动生成工程、软键盘与后台恢复；Windows/macOS 的真实 WebDriver 生命周期、桌面 IME、安装包、签名与更新；Docker 双镜像启动；容量/安全审计与真实支付渠道。Linux 已完成真实 Tauri IPC/窗口强杀重启链路，但不等于所有桌面平台生命周期均已验收。真实 Web E2E 已覆盖一条退款和一条提现审核路径，但不等于所有异常状态、并发条件或支付渠道已经完成端到端验收。
+Android/iOS 编译、模拟器/真机、移动生成工程、软键盘与后台恢复；macOS 的真实 WebDriver 生命周期；Windows/macOS 桌面 IME、安装包、签名与更新；Docker 双镜像启动；容量/安全审计与真实支付渠道。Linux 与 Windows 已完成真实 Tauri IPC/窗口强杀重启链路，但 macOS 生命周期仍未验收，也不代表所有桌面交互、安装或升级场景已经覆盖。真实 Web E2E 已覆盖一条退款和一条提现审核路径，但不等于所有异常状态、并发条件或支付渠道已经完成端到端验收。
 
-已覆盖 Web reload、NativeBridge 重建以及 Linux 真实 Tauri 窗口 SIGKILL/重启后的单笔请求恢复；尚未覆盖 OS 存储损坏/权限异常矩阵、Windows/macOS 同类生命周期和移动后台回收。恢复材料包含业务请求体，本地静态保密依赖浏览器同源/操作系统账户边界，并非硬件密钥库。产品仍为外部人工转账后的核验登记，禁止直接用于真实资金。
+已覆盖 Web reload、NativeBridge 重建、Linux 真实 Tauri 窗口 SIGKILL/重启，以及 Windows 真实 Tauri/WebView2 窗口 taskkill/重启后的单笔请求恢复；尚未覆盖 OS 存储损坏/权限异常矩阵、macOS 同类生命周期和移动后台回收。恢复材料包含业务请求体，本地静态保密依赖浏览器同源/操作系统账户边界，并非硬件密钥库。产品仍为外部人工转账后的核验登记，禁止直接用于真实资金。
 
 ## 历史基线
 
