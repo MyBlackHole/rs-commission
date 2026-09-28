@@ -1,6 +1,6 @@
 # 验证范围与证据
 
-## 0.3 Leptos + Tauri
+## 0.3 Leptos + Tauri 2.x
 
 本轮从 0.2 的 `61396be` 迁移。替换页面、宿主与构建配置；后端账务源码和数据库迁移保留。Cargo.lock 已更新，Dioxus 依赖已移除；一次性格式化/锁定依赖的写权限 workflow 已删除，正式 CI 为 contents:read。
 
@@ -36,7 +36,7 @@
 
 首轮 `081cf44` 的 40 个 Rust 测试和 Web 构建/既有回归通过，但截图人工复核发现分页按钮把未加花括号的 >= 表达式解析成文本；因此首轮的成功不作为 UI 完成证明。已将该属性表达式显式包裹，并补充下一页/上一页实际请求断言。普通资源页采用稳定 Show 分支，避免切换列表时重建整个 ReadPanel。
 
-tests/tauri_transport_browser.py 覆盖 tauri-feature WASM 与 IPC 编码夹具；tests/tauri_lifecycle_e2e.py 同时覆盖真实 Linux 与 Windows Tauri 生命周期：Linux 使用 tauri-driver 2.0.6 + WebKitWebDriver + SIGKILL；Windows 使用匹配 WebView2 Runtime 的 EdgeDriver + taskkill。两端都验证 app-data/业务恢复目录重建、同 path/key/body 重试、bearer 不落恢复文件以及解决后删除恢复文件。Windows 早期 CI 因 Wry 覆盖 EdgeDriver 注入的 WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS 而无法生成 DevToolsActivePort；PR #23 仅在 Windows WebDriver 环境下把 remote-debugging 参数合并进 Wry 默认 browser args 后，真实 hard-kill/restart 路径通过。Python/夹具 JavaScript 只作测试工具。
+当前桌面宿主使用 Tauri 2.x（tauri 2.11.6 / tauri-build 2.6.3）。tests/tauri_transport_browser.py 覆盖 tauri-feature WASM 与 IPC 编码夹具；tests/tauri_lifecycle_e2e.py 同时覆盖真实 Linux 与 Windows Tauri 2.x 生命周期：Linux 使用 tauri-driver 2.0.6 + WebKitWebDriver + SIGKILL；Windows 使用匹配 WebView2 Runtime 的 EdgeDriver + taskkill。两端都验证 app-data/业务恢复目录重建、同 path/key/body 重试、bearer 不落恢复文件以及解决后删除恢复文件。Windows 早期 CI 因 Wry 覆盖 EdgeDriver 注入的 WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS 而无法生成 DevToolsActivePort；PR #23 仅在 Windows WebDriver 环境下把 remote-debugging 参数合并进 Wry 默认 browser args 后，真实 hard-kill/restart 路径通过。Python/夹具 JavaScript 只作测试工具。
 
 ## 证据获取
 
