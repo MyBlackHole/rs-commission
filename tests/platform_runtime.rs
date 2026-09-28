@@ -36,7 +36,6 @@ fn sign(app_id: &str, secret: &str, body: &[u8]) -> String {
     hasher.update(secret.as_bytes());
     hex::encode(hasher.finalize())
 }
-
 #[sqlx::test(migrations = "./migrations")]
 async fn douyin_webhook_is_public_but_signature_verified_and_durable(pool: PgPool) {
     let connection_id = Uuid::new_v4();
