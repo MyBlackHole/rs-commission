@@ -275,13 +275,16 @@ jobs:
       - name: Validate Prometheus config
         run: |
           docker run --rm --entrypoint /bin/promtool \
-            -v "$PWD/deploy:/work:ro" \
-            prom/prometheus:v3.15.0 check config /work/prometheus.yml
+            -v "$PWD/deploy/prometheus.yml:/etc/prometheus/prometheus.yml:ro" \
+            -v "$PWD/deploy/prometheus-alerts.yml:/etc/prometheus/rules/commission.yml:ro" \
+            prom/prometheus:v3.15.0 check config /etc/prometheus/prometheus.yml
       - name: Validate Prometheus alert rules
         run: |
           docker run --rm --entrypoint /bin/promtool \
-            -v "$PWD/deploy:/work:ro" \
+            -v "$PWD/deploy/prometheus-alerts.yml:/work/prometheus-alerts.yml:ro" \
             prom/prometheus:v3.15.0 check rules /work/prometheus-alerts.yml
+      - name: Validate observability Compose profile
+        run: POSTGRES_PASSWORD=ci docker compose --profile observability config >/dev/null
   format:
     runs-on: ubuntu-latest
     steps:
