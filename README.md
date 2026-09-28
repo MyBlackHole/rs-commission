@@ -104,6 +104,10 @@ cargo tauri ios dev
 
 **不会自动代付。** 结算仍是人工转账后的核验登记，尚未接真实渠道、验签、外部账单、实人认证、税务或风控。
 
+## 可观测性
+
+`commissiond` 输出结构化 JSON 日志，每个 HTTP 响应携带 `X-Request-Id`；内部 `GET /metrics` 提供 Prometheus 格式的 HTTP 延迟/状态、DB pool、Outbox、提现异常、平台 RawEvent/checkpoint 与自动解冻 worker 指标。指标使用路由模板和固定平台/status 标签，不记录订单 UUID、token、请求体或 query string。生产必须只从内部监控网络抓取 `/metrics`，不要通过公网网关暴露。详见 [可观测性](docs/OBSERVABILITY.md)。
+
 ## 验证命令
 
 ```bash
@@ -120,4 +124,4 @@ cargo fmt --all -- --check
 
 不要将整个 workspace 按 wasm target 或 all-features 混编，原生宿主和后端不是浏览器依赖。CI 分目标验证。
 
-[API](docs/API.md) · [账务架构](docs/ARCHITECTURE.md) · [多端](docs/CROSS_PLATFORM.md) · [运维](docs/OPERATIONS.md) · [验证](docs/VERIFICATION.md) · [迁移说明](docs/LEPTOS_TAURI_MIGRATION.md)
+[API](docs/API.md) · [账务架构](docs/ARCHITECTURE.md) · [多端](docs/CROSS_PLATFORM.md) · [运维](docs/OPERATIONS.md) · [可观测性](docs/OBSERVABILITY.md) · [验证](docs/VERIFICATION.md) · [迁移说明](docs/LEPTOS_TAURI_MIGRATION.md)
