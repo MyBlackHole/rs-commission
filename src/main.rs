@@ -1,4 +1,7 @@
-use commission::{auth, http, observability, platform::runtime as platform_runtime, service::orders, AppState, MIGRATOR};
+use commission::{
+    auth, http, observability, platform::runtime as platform_runtime, service::orders, AppState,
+    MIGRATOR,
+};
 use sqlx::postgres::PgPoolOptions;
 use std::{env, error::Error, time::Duration};
 use tokio::sync::watch;
@@ -92,8 +95,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         if !platform_enabled {
             return;
         }
-        let mut interval =
-            tokio::time::interval(Duration::from_secs(platform_interval_seconds));
+        let mut interval = tokio::time::interval(Duration::from_secs(platform_interval_seconds));
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         loop {
             tokio::select! {
@@ -150,12 +152,7 @@ async fn shutdown_signal() {
     tokio::select! { _ = ctrl_c => {}, _ = terminate => {} }
 }
 
-fn env_seconds(
-    name: &str,
-    default: u64,
-    min: u64,
-    max: u64,
-) -> Result<u64, Box<dyn Error>> {
+fn env_seconds(name: &str, default: u64, min: u64, max: u64) -> Result<u64, Box<dyn Error>> {
     let raw = match env::var(name) {
         Ok(raw) => raw,
         Err(env::VarError::NotPresent) => return Ok(default),
