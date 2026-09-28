@@ -93,6 +93,12 @@ async fn douyin_webhook_is_public_but_signature_verified_and_durable(pool: PgPoo
     .unwrap();
     assert_eq!(raw, (1, "normalized".into()));
 
+    let ledger_count: i64 = sqlx::query_scalar("SELECT count(*) FROM ledger_entries")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(ledger_count, 0);
+
     let rejected = app
         .oneshot(
             Request::builder()
@@ -294,4 +300,17 @@ async fn connection_management_is_idempotent_and_revocation_is_terminal(pool: Pg
             .await
             .unwrap();
     assert_eq!(stored_ref, "env:MEITUAN_RUNTIME");
+
+    let event_payloads: Vec<Value> = sqlx::query_scalar(
+        "SELECT payload FROM outbox
+         WHERE topic IN ('platform.connections.create','platform.connections.status')
+         ORDER BY created_at,id",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert!(!event_payloads.is_empty());
+    let encoded_events = serde_json::to_string(&event_payloads).unwrap();
+    assert!(!encoded_events.contains("MEITUAN_RUNTIME"));
+    assert!(!encoded_events.contains("credential_ref"));
 }
