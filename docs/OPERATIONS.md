@@ -10,7 +10,7 @@
 
 后端 commissiond 只提供 API。Web 通过 Trunk 开发代理或 Nginx 同源代理访问 /api/v1。Tauri 包含同一 Leptos WASM 页面，调用十个限定命令，由原生 Rust SDK 访问 HTTPS API。Web 的 dist 和 Tauri 的 dist-tauri 不得混用。
 
-开发 Compose API 为 http://127.0.0.1:8081；profile web 前端为 http://127.0.0.1:8080。非 Docker 启动显式设置 DATABASE_URL，先 migrate，再 BIND_ADDR=127.0.0.1:8081 启动。程序不会自动读取 .env。
+开发 Compose API 为 http://127.0.0.1:8081；profile web 前端为 http://127.0.0.1:8080。metrics 在独立内部监听器，非 Docker 默认 `127.0.0.1:9091`，可用 `METRICS_BIND_ADDR` 调整；Compose 使用容器内 `0.0.0.0:9091` 供 Prometheus 抓取但不发布到宿主机。非 Docker 启动显式设置 DATABASE_URL，先 migrate，再 BIND_ADDR=127.0.0.1:8081 启动。程序不会自动读取 .env。
 
 手机 localhost 指手机自己，开发服务器和 API 地址均须可达。不要全局禁用 TLS 校验或任意放宽明文访问。桌面编译链接不等于窗口交互、安装器、签名或移动端验收。
 
@@ -18,7 +18,7 @@
 
 触发器不能防数据库超级用户，运行角色仍需钱包更新权限以执行投影；不可变账本不等于任意 SQL 攻击下的防篡改存储。
 
-生产 Web 必须在 HTTPS 网关后提供服务，设置限流、超时、连接限制和告警。Nginx 样例不签发/续期证书。后端已提供 JSON tracing、X-Request-Id、内部 `/metrics`、Prometheus scrape 配置和基础告警规则；生产仍需独立 Prometheus/日志平台、Alertmanager 或现有通知路由以及高可用部署。MFA、SSO 也尚未实现。
+生产 Web 必须在 HTTPS 网关后提供服务，设置限流、超时、连接限制和告警。Nginx 样例不签发/续期证书。后端已提供 JSON tracing、X-Request-Id、独立内部 metrics listener、Prometheus scrape 配置和基础告警规则；生产仍需独立 Prometheus/日志平台、Alertmanager 或现有通知路由以及高可用部署。MFA、SSO 也尚未实现。
 
 ## 凭据
 
