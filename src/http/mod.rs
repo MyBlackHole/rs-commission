@@ -330,14 +330,7 @@ async fn douyin_webhook(
 
     let outcome = tokio::time::timeout(
         std::time::Duration::from_millis(1500),
-        platform_runtime::ingest_douyin_webhook(
-            &s.pool,
-            id,
-            app_id,
-            event_sign,
-            &body,
-            Utc::now(),
-        ),
+        platform_runtime::ingest_douyin_webhook(&s.pool, id, app_id, event_sign, &body, Utc::now()),
     )
     .await
     .map_err(|_| Error::Busy)??;
