@@ -27,6 +27,8 @@ services:
       DATABASE_URL: postgres://commission:${POSTGRES_PASSWORD}@db:5432/commission
       BIND_ADDR: 0.0.0.0:8080
       RELEASE_WORKER: 'true'
+      PLATFORM_SYNC_WORKER: 'false'
+      PLATFORM_SYNC_INTERVAL_SECONDS: '60'
       RUST_LOG: commission=info,tower_http=info
     ports: ['127.0.0.1:8081:8080']
     depends_on:
