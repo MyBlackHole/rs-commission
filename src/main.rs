@@ -101,7 +101,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
             tokio::select! {
                 _ = platform_shutdown.changed() => break,
                 _ = interval.tick() => {
-                    platform_runtime::run_pull_cycle(&platform_pool, chrono::Utc::now()).await;
+                    let cycle =
+                        platform_runtime::run_pull_cycle(&platform_pool, chrono::Utc::now());
+                    tokio::select! {
+                        _ = platform_shutdown.changed() => break,
+                        _ = cycle => {}
+                    }
                 }
             }
         }
