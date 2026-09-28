@@ -206,8 +206,10 @@ pub async fn ingest_douyin_webhook(
         secret.app_secret,
         required(secret.access_token, "抖音 access_token")?,
     )?;
-    let mut client =
-        DouyinClient::new(DouyinApiSigner::new(credentials), ReqwestDouyinTransport::default());
+    let mut client = DouyinClient::new(
+        DouyinApiSigner::new(credentials),
+        ReqwestDouyinTransport::default(),
+    );
     if let Some(endpoint) = secret.endpoint {
         client = client.with_endpoint(endpoint);
     }
