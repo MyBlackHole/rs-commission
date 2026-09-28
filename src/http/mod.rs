@@ -3,16 +3,19 @@ use crate::{
     error::{Error, Result},
     model::*,
     observability,
+    platform::runtime as platform_runtime,
     service::{catalog, orders, outbox, payouts, queries},
     AppState,
 };
 use axum::{
+    body::Bytes,
     extract::{DefaultBodyLimit, FromRequest, Path, Query, Request, State},
     http::{header, HeaderMap, HeaderValue},
     middleware,
     routing::{get, post},
     Extension, Json, Router,
 };
+use chrono::Utc;
 use serde::de::DeserializeOwned;
 use serde_json::{json, Value};
 use tower_http::set_header::SetResponseHeaderLayer;
@@ -75,6 +78,13 @@ pub fn router(state: AppState) -> Router {
         .route("/outbox", get(list_outbox))
         .route("/outbox/claim", post(claim_outbox))
         .route("/outbox/{id}/ack", post(ack_outbox))
+        .route("/platform/connections", get(platform_connections))
+        .route("/platform/connections/{id}/sync", post(platform_sync))
+        .route(
+            "/platform/connections/{id}/reconcile",
+            post(platform_reconcile),
+        )
+        .layer(DefaultBodyLimit::max(64 * 1024))
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             auth::authenticate,
@@ -84,9 +94,12 @@ pub fn router(state: AppState) -> Router {
         .route("/health/live", get(|| async { Json(json!({"status":"alive"})) }))
         .route("/health/ready", get(ready))
         .route("/metrics", get(observability::metrics))
+        .route(
+            "/webhooks/douyin/{id}",
+            post(douyin_webhook).layer(DefaultBodyLimit::max(1024 * 1024)),
+        )
         .nest("/api/v1", api)
         .fallback(|| async { Error::NotFound })
-        .layer(DefaultBodyLimit::max(64 * 1024))
         .layer(SetResponseHeaderLayer::overriding(header::CACHE_CONTROL, HeaderValue::from_static("no-store")))
         .layer(SetResponseHeaderLayer::overriding(header::X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff")))
         .layer(SetResponseHeaderLayer::overriding(header::REFERRER_POLICY, HeaderValue::from_static("no-referrer")))
@@ -253,4 +266,71 @@ async fn ack_outbox(
     ApiJson(input): ApiJson<AckEvent>,
 ) -> Result<Json<Value>> {
     Ok(Json(outbox::ack(&s.pool, &a, id, input).await?))
+}
+
+async fn platform_connections(
+    State(s): State<AppState>,
+    Extension(a): Extension<Actor>,
+) -> Result<Json<Value>> {
+    a.require(&["integrator", "auditor"])?;
+    Ok(Json(platform_runtime::list_connections(&s.pool).await?))
+}
+
+async fn platform_sync(
+    State(s): State<AppState>,
+    Extension(a): Extension<Actor>,
+    Path(id): Path<Uuid>,
+) -> Result<Json<Value>> {
+    a.require(&["integrator"])?;
+    Ok(Json(
+        platform_runtime::sync_pull_connection(&s.pool, id, Utc::now()).await?,
+    ))
+}
+
+async fn platform_reconcile(
+    State(s): State<AppState>,
+    Extension(a): Extension<Actor>,
+    Path(id): Path<Uuid>,
+    ApiJson(params): ApiJson<Value>,
+) -> Result<Json<Value>> {
+    a.require(&["integrator"])?;
+    if !params.is_object() {
+        return Err(Error::invalid("reconcile 参数必须是 JSON object"));
+    }
+    Ok(Json(
+        platform_runtime::reconcile_douyin(&s.pool, id, &params, Utc::now()).await?,
+    ))
+}
+
+async fn douyin_webhook(
+    State(s): State<AppState>,
+    Path(id): Path<Uuid>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Result<Json<Value>> {
+    let app_id = headers
+        .get("app-id")
+        .and_then(|value| value.to_str().ok())
+        .ok_or_else(|| Error::invalid("抖音 webhook 缺少 app-id"))?;
+    let event_sign = headers
+        .get("event-sign")
+        .and_then(|value| value.to_str().ok())
+        .ok_or_else(|| Error::invalid("抖音 webhook 缺少 event-sign"))?;
+
+    let outcome = tokio::time::timeout(
+        std::time::Duration::from_millis(1500),
+        platform_runtime::ingest_douyin_webhook(
+            &s.pool,
+            id,
+            app_id,
+            event_sign,
+            &body,
+            Utc::now(),
+        ),
+    )
+    .await
+    .map_err(|_| Error::Busy)??;
+
+    tracing::info!(connection_id = %id, outcome = %outcome, "douyin webhook accepted");
+    Ok(Json(json!({"code": 0, "msg": "success"})))
 }
