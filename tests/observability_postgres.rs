@@ -10,6 +10,70 @@ use sqlx::PgPool;
 use tower::ServiceExt;
 use uuid::Uuid;
 
+const ALERT_RULES: &str = include_str!("../deploy/prometheus-alerts.yml");
+const ALERT_METRIC_CONTRACT: &[(&str, &str)] = &[
+    ("commission_http_requests_total", "commission_http_requests_total"),
+    (
+        "commission_http_request_duration_seconds_bucket",
+        "commission_http_request_duration_seconds",
+    ),
+    ("commission_release_worker_enabled", "commission_release_worker_enabled"),
+    (
+        "commission_release_worker_last_tick_age_seconds",
+        "commission_release_worker_last_tick_age_seconds",
+    ),
+    (
+        "commission_release_worker_errors_total",
+        "commission_release_worker_errors_total",
+    ),
+    (
+        "commission_platform_sync_worker_enabled",
+        "commission_platform_sync_worker_enabled",
+    ),
+    (
+        "commission_platform_sync_worker_last_cycle_age_seconds",
+        "commission_platform_sync_worker_last_cycle_age_seconds",
+    ),
+    (
+        "commission_platform_sync_worker_interval_seconds",
+        "commission_platform_sync_worker_interval_seconds",
+    ),
+    (
+        "commission_platform_sync_worker_errors_total",
+        "commission_platform_sync_worker_errors_total",
+    ),
+    (
+        "commission_platform_sync_attempts_total",
+        "commission_platform_sync_attempts_total",
+    ),
+    (
+        "commission_outbox_oldest_pending_age_seconds",
+        "commission_outbox_oldest_pending_age_seconds",
+    ),
+    ("commission_payouts_unknown", "commission_payouts_unknown"),
+    ("commission_platform_raw_events", "commission_platform_raw_events"),
+    (
+        "commission_platform_raw_event_oldest_age_seconds",
+        "commission_platform_raw_event_oldest_age_seconds",
+    ),
+    (
+        "commission_platform_active_connections",
+        "commission_platform_active_connections",
+    ),
+    (
+        "commission_platform_connections_with_success",
+        "commission_platform_connections_with_success",
+    ),
+    (
+        "commission_db_pool_idle_connections",
+        "commission_db_pool_idle_connections",
+    ),
+    (
+        "commission_http_requests_in_flight",
+        "commission_http_requests_in_flight",
+    ),
+];
+
 async fn text(response: axum::response::Response) -> String {
     let bytes = response.into_body().collect().await.unwrap().to_bytes();
     String::from_utf8(bytes.to_vec()).unwrap()
@@ -128,6 +192,19 @@ async fn metrics_surface_request_and_operational_signals(pool: PgPool) {
         .unwrap()
         .starts_with("text/plain; version=0.0.4"));
     let body = text(metrics).await;
+
+    assert!(ALERT_RULES.contains("up{job=\"commission\"}"));
+    for (rule_metric, exposition_metric) in ALERT_METRIC_CONTRACT {
+        assert!(
+            ALERT_RULES.contains(rule_metric),
+            "alert rules no longer reference contracted metric {rule_metric}"
+        );
+        let type_marker = format!("# TYPE {exposition_metric} ");
+        assert!(
+            body.contains(&type_marker),
+            "metrics exposition is missing contracted metric {exposition_metric}"
+        );
+    }
 
     assert!(body.contains("# TYPE commission_http_requests_total counter"));
     assert!(body.contains(
