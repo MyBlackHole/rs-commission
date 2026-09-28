@@ -4,6 +4,8 @@ use axum::{
     http::{HeaderName, HeaderValue, Method, StatusCode},
     middleware::Next,
     response::{IntoResponse, Response},
+    routing::get,
+    Router,
 };
 use std::{
     collections::BTreeMap,
@@ -257,7 +259,6 @@ fn route_label(request: &Request) -> String {
         "/" => "/".to_owned(),
         "/health/live" => "/health/live".to_owned(),
         "/health/ready" => "/health/ready".to_owned(),
-        "/metrics" => "/metrics".to_owned(),
         path if path.starts_with("/api/v1/") => "__unmatched_api__".to_owned(),
         _ => "__unmatched__".to_owned(),
     }
@@ -416,8 +417,22 @@ impl OperationalSnapshot {
     }
 }
 
-pub async fn metrics(State(state): State<AppState>) -> Result<Response> {
-    let operational = OperationalSnapshot::load(&state.pool).await?;
+pub fn router(state: AppState) -> Router {
+    Router::new()
+        .route("/metrics", get(metrics))
+        .with_state(state)
+}
+
+async fn metrics(State(state): State<AppState>) -> Result<Response> {
+    let operational = tokio::time::timeout(
+        Duration::from_secs(3),
+        OperationalSnapshot::load(&state.pool),
+    )
+    .await
+    .map_err(|_| {
+        tracing::warn!("metrics database snapshot timed out");
+        crate::error::Error::Busy
+    })??;
     let body = render_metrics(&state.pool, operational);
     Ok(([("content-type", PROMETHEUS_CONTENT_TYPE)], body).into_response())
 }
