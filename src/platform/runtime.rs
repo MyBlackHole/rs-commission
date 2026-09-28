@@ -4,8 +4,7 @@ use crate::platform::{
         DouyinMessageVerifier, ReqwestDouyinTransport,
     },
     meituan::{
-        MeituanClient, MeituanCredentials, MeituanOrderSync, MeituanSigner,
-        ReqwestMeituanTransport,
+        MeituanClient, MeituanCredentials, MeituanOrderSync, MeituanSigner, ReqwestMeituanTransport,
     },
     taobao::{
         ReqwestTaobaoTransport, TaobaoClient, TaobaoCredentials, TaobaoOrderSync, TaobaoSigner,
@@ -160,8 +159,10 @@ pub async fn reconcile_douyin(
         secret.app_secret,
         required(secret.access_token, "抖音 access_token")?,
     )?;
-    let mut client =
-        DouyinClient::new(DouyinApiSigner::new(credentials), ReqwestDouyinTransport::default());
+    let mut client = DouyinClient::new(
+        DouyinApiSigner::new(credentials),
+        ReqwestDouyinTransport::default(),
+    );
     if let Some(endpoint) = secret.endpoint {
         client = client.with_endpoint(endpoint);
     }
@@ -251,7 +252,9 @@ pub async fn run_pull_cycle(pool: &PgPool, now: DateTime<Utc>) {
                         .get("has_next")
                         .and_then(Value::as_bool)
                         .unwrap_or(false)
-                        || outcome.get("next_cursor").is_some_and(|value| !value.is_null());
+                        || outcome
+                            .get("next_cursor")
+                            .is_some_and(|value| !value.is_null());
                     tracing::info!(
                         %connection_id,
                         %platform,
@@ -286,8 +289,10 @@ async fn sync_taobao(pool: &PgPool, connection: &Connection, now: DateTime<Utc>)
         secret.app_secret,
         required(secret.session, "淘宝 session")?,
     )?;
-    let mut client =
-        TaobaoClient::new(TaobaoSigner::new(credentials), ReqwestTaobaoTransport::default());
+    let mut client = TaobaoClient::new(
+        TaobaoSigner::new(credentials),
+        ReqwestTaobaoTransport::default(),
+    );
     if let Some(endpoint) = secret.endpoint {
         client = client.with_endpoint(endpoint);
     }
@@ -310,8 +315,10 @@ async fn sync_taobao(pool: &PgPool, connection: &Connection, now: DateTime<Utc>)
 async fn sync_meituan(pool: &PgPool, connection: &Connection, now: DateTime<Utc>) -> Result<Value> {
     let secret = load_secret(connection)?;
     let credentials = MeituanCredentials::new(secret.app_key, secret.app_secret)?;
-    let mut client =
-        MeituanClient::new(MeituanSigner::new(credentials), ReqwestMeituanTransport::default());
+    let mut client = MeituanClient::new(
+        MeituanSigner::new(credentials),
+        ReqwestMeituanTransport::default(),
+    );
     if let Some(endpoint) = secret.endpoint {
         client = client.with_endpoint(endpoint);
     }
