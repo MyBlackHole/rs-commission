@@ -66,13 +66,22 @@ impl RuntimeMetrics {
         }
     }
 
-    fn record_http(&self, method: &'static str, route: String, status: StatusCode, elapsed: Duration) {
+    fn record_http(
+        &self,
+        method: &'static str,
+        route: String,
+        status: StatusCode,
+        elapsed: Duration,
+    ) {
         let key = HttpKey {
             method,
             route,
             status: status.as_u16(),
         };
-        let mut http = self.http.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut http = self
+            .http
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let stat = http.entry(key).or_default();
         stat.count = stat.count.saturating_add(1);
         stat.duration_micros = stat.duration_micros.saturating_add(elapsed.as_micros());
@@ -135,9 +144,17 @@ pub async fn observe_http(mut request: Request, next: Next) -> Response {
     span.in_scope(|| {
         let latency_ms = elapsed.as_secs_f64() * 1000.0;
         if status.is_server_error() {
-            tracing::error!(status = status.as_u16(), latency_ms, "http request completed");
+            tracing::error!(
+                status = status.as_u16(),
+                latency_ms,
+                "http request completed"
+            );
         } else {
-            tracing::info!(status = status.as_u16(), latency_ms, "http request completed");
+            tracing::info!(
+                status = status.as_u16(),
+                latency_ms,
+                "http request completed"
+            );
         }
     });
     response
@@ -270,17 +287,18 @@ impl OperationalSnapshot {
 pub async fn metrics(State(state): State<AppState>) -> Result<Response> {
     let operational = OperationalSnapshot::load(&state.pool).await?;
     let body = render_metrics(&state.pool, operational);
-    Ok((
-        [("content-type", PROMETHEUS_CONTENT_TYPE)],
-        body,
-    )
-        .into_response())
+    Ok(([("content-type", PROMETHEUS_CONTENT_TYPE)], body).into_response())
 }
 
 fn render_metrics(pool: &sqlx::PgPool, operational: OperationalSnapshot) -> String {
     let mut out = String::with_capacity(8192);
 
-    help_type(&mut out, "commission_uptime_seconds", "Process uptime.", "gauge");
+    help_type(
+        &mut out,
+        "commission_uptime_seconds",
+        "Process uptime.",
+        "gauge",
+    );
     sample(
         &mut out,
         "commission_uptime_seconds",
