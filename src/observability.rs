@@ -139,7 +139,12 @@ impl RuntimeMetrics {
             .clone()
     }
 
-    fn record_platform_sync(&self, platform: &'static str, outcome: &'static str, elapsed: Duration) {
+    fn record_platform_sync(
+        &self,
+        platform: &'static str,
+        outcome: &'static str,
+        elapsed: Duration,
+    ) {
         let key = PlatformSyncKey { platform, outcome };
         let mut metrics = self
             .platform_sync
@@ -578,9 +583,7 @@ fn render_metrics(pool: &sqlx::PgPool, operational: OperationalSnapshot) -> Stri
         &mut out,
         "commission_platform_sync_worker_enabled",
         "",
-        METRICS
-            .platform_sync_worker_enabled
-            .load(Ordering::Relaxed) as f64,
+        METRICS.platform_sync_worker_enabled.load(Ordering::Relaxed) as f64,
     );
     help_type(
         &mut out,
@@ -606,9 +609,7 @@ fn render_metrics(pool: &sqlx::PgPool, operational: OperationalSnapshot) -> Stri
         &mut out,
         "commission_platform_sync_worker_cycles_total",
         "",
-        METRICS
-            .platform_sync_worker_cycles
-            .load(Ordering::Relaxed) as f64,
+        METRICS.platform_sync_worker_cycles.load(Ordering::Relaxed) as f64,
     );
     help_type(
         &mut out,
@@ -620,9 +621,7 @@ fn render_metrics(pool: &sqlx::PgPool, operational: OperationalSnapshot) -> Stri
         &mut out,
         "commission_platform_sync_worker_errors_total",
         "",
-        METRICS
-            .platform_sync_worker_errors
-            .load(Ordering::Relaxed) as f64,
+        METRICS.platform_sync_worker_errors.load(Ordering::Relaxed) as f64,
     );
     help_type(
         &mut out,
