@@ -12,12 +12,18 @@ use uuid::Uuid;
 
 const ALERT_RULES: &str = include_str!("../deploy/prometheus-alerts.yml");
 const ALERT_METRIC_CONTRACT: &[(&str, &str)] = &[
-    ("commission_http_requests_total", "commission_http_requests_total"),
+    (
+        "commission_http_requests_total",
+        "commission_http_requests_total",
+    ),
     (
         "commission_http_request_duration_seconds_bucket",
         "commission_http_request_duration_seconds",
     ),
-    ("commission_release_worker_enabled", "commission_release_worker_enabled"),
+    (
+        "commission_release_worker_enabled",
+        "commission_release_worker_enabled",
+    ),
     (
         "commission_release_worker_last_tick_age_seconds",
         "commission_release_worker_last_tick_age_seconds",
@@ -51,7 +57,10 @@ const ALERT_METRIC_CONTRACT: &[(&str, &str)] = &[
         "commission_outbox_oldest_pending_age_seconds",
     ),
     ("commission_payouts_unknown", "commission_payouts_unknown"),
-    ("commission_platform_raw_events", "commission_platform_raw_events"),
+    (
+        "commission_platform_raw_events",
+        "commission_platform_raw_events",
+    ),
     (
         "commission_platform_raw_event_oldest_age_seconds",
         "commission_platform_raw_event_oldest_age_seconds",
