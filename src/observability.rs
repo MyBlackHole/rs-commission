@@ -111,7 +111,7 @@ impl Drop for InFlightGuard {
     }
 }
 
-pub async fn observe_http(mut request: Request, next: Next) -> Response {
+pub async fn observe_http(request: Request, next: Next) -> Response {
     let request_id = request
         .headers()
         .get(X_REQUEST_ID)
