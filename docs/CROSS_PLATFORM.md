@@ -1,4 +1,4 @@
-# Leptos + Tauri 多端架构（0.3）
+# Leptos + Tauri 2.x 多端架构（0.3）
 
 ## 一份 UI，两类宿主
 
@@ -19,7 +19,7 @@
 
 `console → client → types`；`shell → client → types`；`server → types`。只有 server 启用 types/postgres。`console` 的 tauri feature 只切换 IPC 传输，不把 tauri crate 或系统依赖编进 WASM。
 
-固定 Leptos 0.8.20、Tauri 2.11.6、tauri-build 2.6.3、Trunk 0.21.14；开发 CLI 使用 tauri-cli 2.11.4。框架 crate 与 CLI 版本号不必相同，均提交或明确固定。锁文件不能在 CI 每次重新随机生成。
+当前固定 Leptos 0.8.20、Tauri 2.x（tauri 2.11.6、tauri-build 2.6.3）、Trunk 0.21.14；开发 CLI 使用 tauri-cli 2.11.4。框架 crate 与 CLI 版本号不必相同，均提交或明确固定。锁文件不能在 CI 每次重新随机生成。
 
 ```bash
 # apps/console 中
