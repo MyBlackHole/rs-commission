@@ -18,6 +18,18 @@ use uuid::Uuid;
 
 const X_REQUEST_ID: &str = "x-request-id";
 const PROMETHEUS_CONTENT_TYPE: &str = "text/plain; version=0.0.4; charset=utf-8";
+const HTTP_DURATION_BUCKETS: [(&str, f64); 10] = [
+    ("0.005", 0.005),
+    ("0.010", 0.010),
+    ("0.025", 0.025),
+    ("0.050", 0.050),
+    ("0.100", 0.100),
+    ("0.250", 0.250),
+    ("0.500", 0.500),
+    ("1.000", 1.000),
+    ("2.500", 2.500),
+    ("5.000", 5.000),
+];
 
 #[derive(Clone, Copy, Debug)]
 pub struct RequestId(pub Uuid);
@@ -33,6 +45,7 @@ struct HttpKey {
 struct HttpStat {
     count: u64,
     duration_micros: u128,
+    duration_buckets: [u64; HTTP_DURATION_BUCKETS.len()],
 }
 
 struct RuntimeMetrics {
@@ -66,6 +79,12 @@ impl RuntimeMetrics {
         let stat = http.entry(key).or_default();
         stat.count = stat.count.saturating_add(1);
         stat.duration_micros = stat.duration_micros.saturating_add(elapsed.as_micros());
+        let elapsed_seconds = elapsed.as_secs_f64();
+        for (index, (_, upper_bound)) in HTTP_DURATION_BUCKETS.iter().enumerate() {
+            if elapsed_seconds <= *upper_bound {
+                stat.duration_buckets[index] = stat.duration_buckets[index].saturating_add(1);
+            }
+        }
     }
 
     fn http_snapshot(&self) -> BTreeMap<HttpKey, HttpStat> {
@@ -297,19 +316,36 @@ fn render_metrics(pool: &sqlx::PgPool, operational: OperationalSnapshot) -> Stri
         &mut out,
         "commission_http_request_duration_seconds",
         "HTTP request duration by method, matched route and status.",
-        "summary",
+        "histogram",
     );
     for (key, stat) in METRICS.http_snapshot() {
-        let labels = format!(
-            "{{method=\"{}\",route=\"{}\",status=\"{}\"}}",
+        let base_labels = format!(
+            "method=\"{}\",route=\"{}\",status=\"{}\"",
             escape_label(key.method),
             escape_label(&key.route),
             key.status
         );
+        let labels = format!("{{{base_labels}}}");
         sample(
             &mut out,
             "commission_http_requests_total",
             &labels,
+            stat.count as f64,
+        );
+        for (index, (upper_bound, _)) in HTTP_DURATION_BUCKETS.iter().enumerate() {
+            let bucket_labels = format!("{{{base_labels},le=\"{upper_bound}\"}}");
+            sample(
+                &mut out,
+                "commission_http_request_duration_seconds_bucket",
+                &bucket_labels,
+                stat.duration_buckets[index] as f64,
+            );
+        }
+        let infinity_labels = format!("{{{base_labels},le=\"+Inf\"}}");
+        sample(
+            &mut out,
+            "commission_http_request_duration_seconds_bucket",
+            &infinity_labels,
             stat.count as f64,
         );
         sample(
