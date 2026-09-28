@@ -437,7 +437,7 @@ mod tests {
 
     #[test]
     fn truncation_is_character_safe() {
-        assert_eq!(truncate("淘宝错误abcdef", 4), "淘宝错误a");
+        assert_eq!(truncate("淘宝错误abcdef", 4), "淘宝错误");
     }
 
     #[test]
