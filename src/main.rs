@@ -58,6 +58,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let platform_enabled =
         env::var("PLATFORM_SYNC_WORKER").unwrap_or_else(|_| "false".into()) == "true";
     let platform_interval_seconds = env_seconds("PLATFORM_SYNC_INTERVAL_SECONDS", 60, 10, 3600)?;
+    let metrics_bind =
+        env::var("METRICS_BIND_ADDR").unwrap_or_else(|_| "127.0.0.1:9091".into());
     observability::configure_workers(release_enabled, platform_enabled, platform_interval_seconds);
 
     let worker_pool = pool.clone();
@@ -116,23 +118,50 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let bind = env::var("BIND_ADDR").unwrap_or_else(|_| "127.0.0.1:8080".into());
     let listener = tokio::net::TcpListener::bind(&bind).await?;
+    let metrics_listener = tokio::net::TcpListener::bind(&metrics_bind).await?;
     tracing::info!(
         address = %bind,
+        metrics_address = %metrics_bind,
         release_worker = release_enabled,
         platform_sync_worker = platform_enabled,
         platform_sync_interval_seconds = platform_interval_seconds,
         "commission server listening"
     );
+
+    let metrics_state = AppState { pool: pool.clone() };
+    let mut metrics_shutdown = shutdown_rx.clone();
+    let metrics_server = tokio::spawn(async move {
+        let result = axum::serve(metrics_listener, observability::router(metrics_state))
+            .with_graceful_shutdown(async move {
+                if *metrics_shutdown.borrow() {
+                    return;
+                }
+                while metrics_shutdown.changed().await.is_ok() {
+                    if *metrics_shutdown.borrow() {
+                        return;
+                    }
+                }
+            })
+            .await;
+        if let Err(error) = result {
+            tracing::error!(%error, "metrics server failed");
+        }
+    });
+
     let app = http::router(AppState { pool: pool.clone() });
-    axum::serve(listener, app)
+    let signal_shutdown = shutdown_tx.clone();
+    let serve_result = axum::serve(listener, app)
         .with_graceful_shutdown(async move {
             shutdown_signal().await;
             tracing::info!("shutdown signal received");
-            let _ = shutdown_tx.send(true);
+            let _ = signal_shutdown.send(true);
         })
-        .await?;
+        .await;
+    let _ = shutdown_tx.send(true);
     release_worker.await?;
     platform_worker.await?;
+    metrics_server.await?;
+    serve_result?;
     pool.close().await;
     tracing::info!("commission server stopped");
     Ok(())
