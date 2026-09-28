@@ -123,7 +123,7 @@ pub async fn observe_http(mut request: Request, next: Next) -> Response {
     let span = tracing::info_span!(
         "http.request",
         request_id = %request_id,
-        method,
+        method = method,
         route = %route
     );
     let mut response = next.run(request).instrument(span.clone()).await;
