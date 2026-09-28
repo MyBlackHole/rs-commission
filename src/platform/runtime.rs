@@ -138,7 +138,9 @@ pub async fn sync_pull_connection(
     };
 
     if let Err(error) = &result {
-        record_failure(pool, &connection, now, error).await?;
+        if !matches!(error, PlatformError::ConcurrentSync) {
+            record_failure(pool, &connection, now, error).await?;
+        }
     }
     result
 }
@@ -181,7 +183,9 @@ pub async fn reconcile_douyin(
             "next_cursor": outcome.next_cursor,
         })),
         Err(error) => {
-            record_failure(pool, &connection, now, &error).await?;
+            if !matches!(error, PlatformError::ConcurrentSync) {
+                record_failure(pool, &connection, now, &error).await?;
+            }
             Err(error)
         }
     }
