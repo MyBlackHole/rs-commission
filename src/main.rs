@@ -58,11 +58,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let platform_enabled =
         env::var("PLATFORM_SYNC_WORKER").unwrap_or_else(|_| "false".into()) == "true";
     let platform_interval_seconds = env_seconds("PLATFORM_SYNC_INTERVAL_SECONDS", 60, 10, 3600)?;
-    observability::configure_workers(
-        release_enabled,
-        platform_enabled,
-        platform_interval_seconds,
-    );
+    observability::configure_workers(release_enabled, platform_enabled, platform_interval_seconds);
 
     let worker_pool = pool.clone();
     let mut worker_shutdown = shutdown_rx.clone();
