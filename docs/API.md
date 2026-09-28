@@ -24,7 +24,7 @@ admin 可管理全部，但不能用申请凭据审核自己的提现。
 |---|---|
 | operator | 账户、推广绑定、规则、订单、退款、到期解冻、申请提现、业务与审计查询 |
 | finance | 业务账务查询、到期解冻、提现审核 / 执行 / 核验、内部对账 |
-| integrator | 推广绑定、订单 / 退款事实接入、试算、可信内部查询、Outbox 消费 |
+| integrator | 推广绑定、订单 / 退款事实接入、试算、可信内部查询、Outbox 消费、外部平台连接管理/同步/对账补偿 |
 | auditor | 只读业务、审计、Outbox 与对账 |
 | member | 仅绑定账户的余额、分配、流水、提现，以及该账户提现申请 |
 
@@ -62,8 +62,12 @@ admin 可管理全部，但不能用申请凭据审核自己的提现。
 | GET | `/outbox` | 事件列表 |
 | POST | `/outbox/claim` | 按租约领取 |
 | POST | `/outbox/{id}/ack` | 确认事件 |
+| GET / POST | `/platform/connections` | 平台连接状态 / 创建连接 |
+| POST | `/platform/connections/{id}/status` | active / suspended / revoked |
+| POST | `/platform/connections/{id}/sync` | 淘宝或美团立即同步一页 |
+| POST | `/platform/connections/{id}/reconcile` | 抖音联盟漏单补偿/对账查询 |
 
-无需认证：`/`、`/app.js`、`/app.css`、`/health/live`、`/health/ready`。
+无需业务 Bearer：`/`、`/health/live`、`/health/ready`、`/metrics`、`/webhooks/douyin/{id}`。其中 `/metrics` 仅应由内部监控网络访问；抖音 webhook 必须通过 `app-id` / `event-sign` 验签，不是匿名可信入口。
 
 ## 创建账户与关系
 
@@ -194,3 +198,72 @@ destination_ref 是外部受控收款账户引用，不是银行卡明文，首�
 ```
 
 相同有效租约重复 ACK 成功，过期或被重领的旧租约返回冲突。已领取不等于已投递。租约是服务端并发控制，不是下游恰好一次处理保证。
+
+
+## 外部平台运行时
+
+平台连接只保存 `credential_ref`，当前运行时仅接受 `env:NAME`，不会把 app_secret/session/access_token 回显到 API、审计或 Outbox。
+
+先在服务进程环境配置 secret，例如：
+
+```bash
+TAOBAO_MAIN='{"app_key":"...","app_secret":"...","session":"..."}'
+DOUYIN_MAIN='{"app_key":"...","app_secret":"...","access_token":"..."}'
+MEITUAN_MAIN='{"app_key":"...","app_secret":"..."}'
+```
+
+创建连接要求 integrator/admin 与 Idempotency-Key：
+
+```json
+{
+  "platform":"taobao",
+  "external_account_id":"publisher-001",
+  "display_name":"淘宝主账号",
+  "connection_type":"app_credentials",
+  "credential_ref":"env:TAOBAO_MAIN",
+  "settlement_owner_account_id":null
+}
+```
+
+`credential_ref` 只是环境变量名，不是密钥本身。当前支持 `taobao/douyin/meituan`，连接状态可改为 `active/suspended/revoked`；revoked 为终态，不能重新启用。
+
+淘宝/美团可以：
+
+```text
+POST /api/v1/platform/connections/{id}/sync
+```
+
+每次手工调用推进一页。后台 worker 开启后，每个周期对 active 淘宝/美团连接最多连续推进 32 页：
+
+```bash
+PLATFORM_SYNC_WORKER=true
+PLATFORM_SYNC_INTERVAL_SECONDS=60
+```
+
+默认 `PLATFORM_SYNC_WORKER=false`，升级后不会自动访问真实平台。
+
+抖音以 webhook 为实时主路径：
+
+```text
+POST /webhooks/douyin/{connection_id}
+app-id: <app_key>
+event-sign: <平台签名>
+```
+
+成功响应固定为：
+
+```json
+{"code":0,"msg":"success"}
+```
+
+服务端将 webhook 处理限制在约 1.5 秒内；未能完成时返回非 2xx，让平台按其重推机制再次投递。RawEvent 使用平台 msg_id/payload hash 去重，因此重复投递不会重复产生账务事实。抖店官方消息推送要求处理 `app-id`、`event-sign`，并要求在 2 秒响应窗口内返回成功；参考抖店开放平台“消息推送服务接入指南”。
+
+抖音漏单补偿由 integrator 显式调用：
+
+```text
+POST /api/v1/platform/connections/{id}/reconcile
+```
+
+body 是 `alliance.getOrderList` 的业务 `param_json` object。当前没有自动生成抖音 reconcile 时间窗口，避免在未确认平台业务窗口/分页策略前由后台任务擅自扩大查询范围。
+
+平台同步仍只写 RawEvent、observation、projection 与 checkpoint；不会直接产生内部 LedgerEntry。
