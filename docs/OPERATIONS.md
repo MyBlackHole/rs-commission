@@ -8,7 +8,7 @@
 
 ## 平台和部署
 
-后端 commissiond 只提供 API。Web 通过 Trunk 开发代理或 Nginx 同源代理访问 /api/v1。Tauri 包含同一 Leptos WASM 页面，调用七个限定命令，由原生 Rust SDK 访问 HTTPS API。Web 的 dist 和 Tauri 的 dist-tauri 不得混用。
+后端 commissiond 只提供 API。Web 通过 Trunk 开发代理或 Nginx 同源代理访问 /api/v1。Tauri 包含同一 Leptos WASM 页面，调用十个限定命令，由原生 Rust SDK 访问 HTTPS API。Web 的 dist 和 Tauri 的 dist-tauri 不得混用。
 
 开发 Compose API 为 http://127.0.0.1:8081；profile web 前端为 http://127.0.0.1:8080。非 Docker 启动显式设置 DATABASE_URL，先 migrate，再 BIND_ADDR=127.0.0.1:8081 启动。程序不会自动读取 .env。
 
@@ -27,6 +27,14 @@
 bootstrap 只在没有凭据时执行，无公开找回后门。管理员遗失需要受控 DBA 恢复并保存独立审计，不是直接改账。`commissiond generate-token` 无需数据库，生成高熵令牌。
 
 令牌不放 URL、截图、工单、源码或日志。初始化输出含秘密，不自动采集到公共日志。原生登录后令牌在 Rust 内存，录入仍经过 WebView；不是对抗被入侵 UI 的保证。凭据分离不等于自然人分离。
+
+## 外部平台运行时
+
+平台连接的 `credential_ref` 当前仅支持 `env:NAME`。密钥 JSON 放在 commissiond 进程环境，不放数据库；API/审计只展示 `credential_configured=true`，不回显引用名或 secret。
+
+`PLATFORM_SYNC_WORKER=false` 为默认值。只有显式启用后，后台任务才会轮询 active 的淘宝/美团连接；每轮每连接最多 32 页，单连接错误写入 checkpoint `last_error`，不会阻断其他连接。抖音实时消息由 `/webhooks/douyin/{connection_id}` 接收并验签，漏单补偿通过 integrator 的 reconcile API 手工触发。
+
+当前连接管理支持创建和 active/suspended/revoked 状态切换；revoked 不能恢复。密钥轮换通过更新对应环境 secret 并重启/滚动服务完成，后续再提供外部 Secret Manager/KMS resolver。
 
 ## 外部资金
 
@@ -48,7 +56,7 @@ capture/refund 是可信业务事实入口，不是匿名支付回调。未来�
 
 响应丢失不等于失败。上游必须持久保存业务号、原请求和 key；原键重试或查询业务状态。跨凭据无法取到旧作用域的响应，只能依靠业务号唯一约束防重复效果。
 
-原生桥与 UI 在未知结果时禁止覆盖/丢弃/退出登录；重复 execute 复用相同 key/body，已知结果会缓存重放。强杀、刷新、系统回收仍可能丢失内存。禁止退出按钮不是持久化机制，当前没有跨重启恢复。
+原生桥与 UI 在未知结果时禁止覆盖/丢弃/退出登录；重复 execute 复用相同 key/body，已知结果会缓存重放。Web 使用同源 localStorage、Tauri 使用应用数据文件保存单笔恢复材料；Linux/Windows 已验证强杀后跨进程恢复。仍未覆盖存储损坏、权限异常、移动后台回收等故障矩阵。
 
 提交前崩溃事务回滚，提交后按幂等或业务号查询。Outbox 消费者必须处理已消费未 ACK 的重复投递。
 
