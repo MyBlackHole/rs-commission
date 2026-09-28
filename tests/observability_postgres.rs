@@ -11,12 +11,7 @@ use tower::ServiceExt;
 use uuid::Uuid;
 
 async fn text(response: axum::response::Response) -> String {
-    let bytes = response
-        .into_body()
-        .collect()
-        .await
-        .unwrap()
-        .to_bytes();
+    let bytes = response.into_body().collect().await.unwrap().to_bytes();
     String::from_utf8(bytes.to_vec()).unwrap()
 }
 
@@ -114,15 +109,13 @@ async fn metrics_surface_request_and_operational_signals(pool: PgPool) {
 
     let metrics = get(&app, "/metrics", None).await;
     assert_eq!(metrics.status(), StatusCode::OK);
-    assert!(
-        metrics
-            .headers()
-            .get("content-type")
-            .unwrap()
-            .to_str()
-            .unwrap()
-            .starts_with("text/plain; version=0.0.4")
-    );
+    assert!(metrics
+        .headers()
+        .get("content-type")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .starts_with("text/plain; version=0.0.4"));
     let body = text(metrics).await;
 
     assert!(body.contains("# TYPE commission_http_requests_total counter"));
@@ -135,11 +128,9 @@ async fn metrics_surface_request_and_operational_signals(pool: PgPool) {
     assert!(body.contains(
         "commission_platform_raw_events{platform=\"taobao\",status=\"pending\"} 1.000000"
     ));
-    assert!(body.contains(
-        "commission_platform_active_connections{platform=\"taobao\"} 1.000000"
-    ));
-    assert!(body.contains(
-        "commission_platform_connections_with_success{platform=\"taobao\"} 1.000000"
-    ));
+    assert!(body.contains("commission_platform_active_connections{platform=\"taobao\"} 1.000000"));
+    assert!(
+        body.contains("commission_platform_connections_with_success{platform=\"taobao\"} 1.000000")
+    );
     assert!(!body.contains(&supplied.to_string()));
 }
