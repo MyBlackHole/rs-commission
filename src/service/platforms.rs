@@ -34,18 +34,11 @@ pub async fn create_connection(
     actor.require(&["integrator"])?;
     validate_create(&input)?;
 
-    let mut work = match Work::begin(
-        pool,
-        actor,
-        "platform.connections.create",
-        key,
-        &input,
-    )
-    .await?
-    {
-        Start::Replay(value) => return Ok(value),
-        Start::New(work) => work,
-    };
+    let mut work =
+        match Work::begin(pool, actor, "platform.connections.create", key, &input).await? {
+            Start::Replay(value) => return Ok(value),
+            Start::New(work) => work,
+        };
 
     if let Some(account_id) = input.settlement_owner_account_id {
         let exists: bool = sqlx::query_scalar(
@@ -104,7 +97,9 @@ pub async fn set_connection_status(
 ) -> Result<Value> {
     actor.require(&["integrator"])?;
     if !["active", "suspended", "revoked"].contains(&input.status.as_str()) {
-        return Err(Error::invalid("平台连接状态必须为 active/suspended/revoked"));
+        return Err(Error::invalid(
+            "平台连接状态必须为 active/suspended/revoked",
+        ));
     }
 
     let mut work = match Work::begin(
@@ -120,12 +115,11 @@ pub async fn set_connection_status(
         Start::New(work) => work,
     };
 
-    let current: Option<(String, String)> = sqlx::query_as(
-        "SELECT platform,status FROM platform_connections WHERE id=$1 FOR UPDATE",
-    )
-    .bind(id)
-    .fetch_optional(&mut *work.tx)
-    .await?;
+    let current: Option<(String, String)> =
+        sqlx::query_as("SELECT platform,status FROM platform_connections WHERE id=$1 FOR UPDATE")
+            .bind(id)
+            .fetch_optional(&mut *work.tx)
+            .await?;
     let (platform, current_status) = current.ok_or(Error::NotFound)?;
     if current_status == "revoked" && input.status != "revoked" {
         return Err(Error::conflict("已撤销的平台连接不能重新启用"));
@@ -172,7 +166,9 @@ fn validate_credential_ref(value: &str) -> Result<()> {
         .ok_or_else(|| Error::invalid("credential_ref 当前仅支持 env:NAME"))?;
     if name.is_empty()
         || name.len() > 128
-        || !name.bytes().all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
+        || !name
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
     {
         return Err(Error::invalid("credential_ref 环境变量名称无效"));
     }
