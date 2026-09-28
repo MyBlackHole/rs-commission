@@ -40,27 +40,30 @@ struct Secret {
     endpoint: Option<String>,
 }
 
+#[derive(Debug, sqlx::FromRow)]
+struct ConnectionStatusRow {
+    id: Uuid,
+    platform: String,
+    external_account_id: String,
+    display_name: String,
+    connection_type: String,
+    status: String,
+    settlement_owner_account_id: Option<Uuid>,
+    created_at: DateTime<Utc>,
+    updated_at: DateTime<Utc>,
+    checkpoint_count: i64,
+    last_attempt_at: Option<DateTime<Utc>>,
+    last_success_at: Option<DateTime<Utc>>,
+    last_error: Option<String>,
+}
+
 pub async fn list_connections(pool: &PgPool) -> Result<Value> {
-    let rows: Vec<(
-        Uuid,
-        String,
-        String,
-        String,
-        String,
-        String,
-        Option<Uuid>,
-        DateTime<Utc>,
-        DateTime<Utc>,
-        i64,
-        Option<DateTime<Utc>>,
-        Option<DateTime<Utc>>,
-        Option<String>,
-    )> = sqlx::query_as(
+    let rows: Vec<ConnectionStatusRow> = sqlx::query_as(
         "SELECT c.id,c.platform,c.external_account_id,c.display_name,c.connection_type,c.status,
                 c.settlement_owner_account_id,c.created_at,c.updated_at,
-                count(cp.stream)::bigint,
-                max(cp.last_attempt_at),
-                max(cp.last_success_at),
+                count(cp.stream)::bigint AS checkpoint_count,
+                max(cp.last_attempt_at) AS last_attempt_at,
+                max(cp.last_success_at) AS last_success_at,
                 (
                     SELECT cp2.last_error
                     FROM platform_sync_checkpoints cp2
@@ -79,39 +82,23 @@ pub async fn list_connections(pool: &PgPool) -> Result<Value> {
 
     Ok(Value::Array(
         rows.into_iter()
-            .map(
-                |(
-                    id,
-                    platform,
-                    external_account_id,
-                    display_name,
-                    connection_type,
-                    status,
-                    settlement_owner_account_id,
-                    created_at,
-                    updated_at,
-                    checkpoint_count,
-                    last_attempt_at,
-                    last_success_at,
-                    last_error,
-                )| {
-                    json!({
-                        "id": id,
-                        "platform": platform,
-                        "external_account_id": external_account_id,
-                        "display_name": display_name,
-                        "connection_type": connection_type,
-                        "status": status,
-                        "settlement_owner_account_id": settlement_owner_account_id,
-                        "created_at": created_at,
-                        "updated_at": updated_at,
-                        "checkpoint_count": checkpoint_count,
-                        "last_attempt_at": last_attempt_at,
-                        "last_success_at": last_success_at,
-                        "last_error": last_error,
-                    })
-                },
-            )
+            .map(|row| {
+                json!({
+                    "id": row.id,
+                    "platform": row.platform,
+                    "external_account_id": row.external_account_id,
+                    "display_name": row.display_name,
+                    "connection_type": row.connection_type,
+                    "status": row.status,
+                    "settlement_owner_account_id": row.settlement_owner_account_id,
+                    "created_at": row.created_at,
+                    "updated_at": row.updated_at,
+                    "checkpoint_count": row.checkpoint_count,
+                    "last_attempt_at": row.last_attempt_at,
+                    "last_success_at": row.last_success_at,
+                    "last_error": row.last_error,
+                })
+            })
             .collect(),
     ))
 }
