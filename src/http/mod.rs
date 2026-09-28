@@ -104,7 +104,6 @@ pub fn router(state: AppState) -> Router {
         .route("/", get(index))
         .route("/health/live", get(|| async { Json(json!({"status":"alive"})) }))
         .route("/health/ready", get(ready))
-        .route("/metrics", get(observability::metrics))
         .route(
             "/webhooks/douyin/{id}",
             post(douyin_webhook).layer(DefaultBodyLimit::max(1024 * 1024)),
