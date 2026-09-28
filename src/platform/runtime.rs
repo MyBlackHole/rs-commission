@@ -2,15 +2,16 @@ use crate::{
     observability,
     platform::{
         douyin::{
-        DouyinAllianceSync, DouyinApiSigner, DouyinClient, DouyinCredentials,
-        DouyinMessageVerifier, ReqwestDouyinTransport,
-    },
-    meituan::{
-        MeituanClient, MeituanCredentials, MeituanOrderSync, MeituanSigner, ReqwestMeituanTransport,
-    },
-    taobao::{
-        ReqwestTaobaoTransport, TaobaoClient, TaobaoCredentials, TaobaoOrderSync, TaobaoSigner,
-    },
+            DouyinAllianceSync, DouyinApiSigner, DouyinClient, DouyinCredentials,
+            DouyinMessageVerifier, ReqwestDouyinTransport,
+        },
+        meituan::{
+            MeituanClient, MeituanCredentials, MeituanOrderSync, MeituanSigner,
+            ReqwestMeituanTransport,
+        },
+        taobao::{
+            ReqwestTaobaoTransport, TaobaoClient, TaobaoCredentials, TaobaoOrderSync, TaobaoSigner,
+        },
         PlatformError, Result,
     },
 };
