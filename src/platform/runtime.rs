@@ -1,5 +1,7 @@
-use crate::{observability, platform::{
-    douyin::{
+use crate::{
+    observability,
+    platform::{
+        douyin::{
         DouyinAllianceSync, DouyinApiSigner, DouyinClient, DouyinCredentials,
         DouyinMessageVerifier, ReqwestDouyinTransport,
     },
@@ -9,8 +11,9 @@ use crate::{observability, platform::{
     taobao::{
         ReqwestTaobaoTransport, TaobaoClient, TaobaoCredentials, TaobaoOrderSync, TaobaoSigner,
     },
-    PlatformError, Result,
-}};
+        PlatformError, Result,
+    },
+};
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
 use serde_json::{json, Value};
