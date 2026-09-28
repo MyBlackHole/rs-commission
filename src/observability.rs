@@ -30,6 +30,16 @@ const HTTP_DURATION_BUCKETS: [(&str, f64); 10] = [
     ("2.500", 2.500),
     ("5.000", 5.000),
 ];
+const PLATFORM_SYNC_DURATION_BUCKETS: [(&str, f64); 8] = [
+    ("0.100", 0.100),
+    ("0.500", 0.500),
+    ("1.000", 1.000),
+    ("2.500", 2.500),
+    ("5.000", 5.000),
+    ("10.000", 10.000),
+    ("30.000", 30.000),
+    ("60.000", 60.000),
+];
 
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
 struct HttpKey {
@@ -45,13 +55,34 @@ struct HttpStat {
     duration_buckets: [u64; HTTP_DURATION_BUCKETS.len()],
 }
 
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+struct PlatformSyncKey {
+    platform: &'static str,
+    outcome: &'static str,
+}
+
+#[derive(Clone, Debug, Default)]
+struct PlatformSyncStat {
+    count: u64,
+    duration_micros: u128,
+    duration_buckets: [u64; PLATFORM_SYNC_DURATION_BUCKETS.len()],
+}
+
 struct RuntimeMetrics {
     started_at: Instant,
     in_flight: AtomicU64,
+    release_worker_enabled: AtomicU64,
     release_worker_runs: AtomicU64,
     release_worker_released: AtomicU64,
     release_worker_errors: AtomicU64,
+    release_worker_last_tick_millis: AtomicU64,
+    platform_sync_worker_enabled: AtomicU64,
+    platform_sync_worker_interval_seconds: AtomicU64,
+    platform_sync_worker_cycles: AtomicU64,
+    platform_sync_worker_errors: AtomicU64,
+    platform_sync_worker_last_cycle_millis: AtomicU64,
     http: Mutex<BTreeMap<HttpKey, HttpStat>>,
+    platform_sync: Mutex<BTreeMap<PlatformSyncKey, PlatformSyncStat>>,
 }
 
 impl RuntimeMetrics {
@@ -59,10 +90,18 @@ impl RuntimeMetrics {
         Self {
             started_at: Instant::now(),
             in_flight: AtomicU64::new(0),
+            release_worker_enabled: AtomicU64::new(0),
             release_worker_runs: AtomicU64::new(0),
             release_worker_released: AtomicU64::new(0),
             release_worker_errors: AtomicU64::new(0),
+            release_worker_last_tick_millis: AtomicU64::new(0),
+            platform_sync_worker_enabled: AtomicU64::new(0),
+            platform_sync_worker_interval_seconds: AtomicU64::new(0),
+            platform_sync_worker_cycles: AtomicU64::new(0),
+            platform_sync_worker_errors: AtomicU64::new(0),
+            platform_sync_worker_last_cycle_millis: AtomicU64::new(0),
             http: Mutex::new(BTreeMap::new()),
+            platform_sync: Mutex::new(BTreeMap::new()),
         }
     }
 
@@ -98,6 +137,43 @@ impl RuntimeMetrics {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .clone()
+    }
+
+    fn record_platform_sync(
+        &self,
+        platform: &'static str,
+        outcome: &'static str,
+        elapsed: Duration,
+    ) {
+        let key = PlatformSyncKey { platform, outcome };
+        let mut metrics = self
+            .platform_sync
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let stat = metrics.entry(key).or_default();
+        stat.count = stat.count.saturating_add(1);
+        stat.duration_micros = stat.duration_micros.saturating_add(elapsed.as_micros());
+        let elapsed_seconds = elapsed.as_secs_f64();
+        for (index, (_, upper_bound)) in PLATFORM_SYNC_DURATION_BUCKETS.iter().enumerate() {
+            if elapsed_seconds <= *upper_bound {
+                stat.duration_buckets[index] = stat.duration_buckets[index].saturating_add(1);
+            }
+        }
+    }
+
+    fn platform_sync_snapshot(&self) -> BTreeMap<PlatformSyncKey, PlatformSyncStat> {
+        self.platform_sync
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone()
+    }
+
+    fn elapsed_millis(&self) -> u64 {
+        self.started_at
+            .elapsed()
+            .as_millis()
+            .try_into()
+            .unwrap_or(u64::MAX)
     }
 }
 
@@ -187,8 +263,27 @@ fn route_label(request: &Request) -> String {
     }
 }
 
+pub fn configure_workers(
+    release_worker_enabled: bool,
+    platform_sync_worker_enabled: bool,
+    platform_sync_interval_seconds: u64,
+) {
+    METRICS
+        .release_worker_enabled
+        .store(release_worker_enabled as u64, Ordering::Relaxed);
+    METRICS
+        .platform_sync_worker_enabled
+        .store(platform_sync_worker_enabled as u64, Ordering::Relaxed);
+    METRICS
+        .platform_sync_worker_interval_seconds
+        .store(platform_sync_interval_seconds, Ordering::Relaxed);
+}
+
 pub fn release_worker_tick() {
     METRICS.release_worker_runs.fetch_add(1, Ordering::Relaxed);
+    METRICS
+        .release_worker_last_tick_millis
+        .store(METRICS.elapsed_millis(), Ordering::Relaxed);
 }
 
 pub fn release_worker_released() {
@@ -201,6 +296,43 @@ pub fn release_worker_error() {
     METRICS
         .release_worker_errors
         .fetch_add(1, Ordering::Relaxed);
+}
+
+pub fn platform_sync_worker_cycle() {
+    METRICS
+        .platform_sync_worker_cycles
+        .fetch_add(1, Ordering::Relaxed);
+    METRICS
+        .platform_sync_worker_last_cycle_millis
+        .store(METRICS.elapsed_millis(), Ordering::Relaxed);
+}
+
+pub fn platform_sync_worker_error() {
+    METRICS
+        .platform_sync_worker_errors
+        .fetch_add(1, Ordering::Relaxed);
+}
+
+pub fn platform_sync_observe(platform: &str, success: bool, elapsed: Duration) {
+    METRICS.record_platform_sync(
+        platform_label(platform),
+        if success { "success" } else { "error" },
+        elapsed,
+    );
+}
+
+fn platform_label(platform: &str) -> &'static str {
+    match platform {
+        "taobao" => "taobao",
+        "douyin" => "douyin",
+        "meituan" => "meituan",
+        _ => "other",
+    }
+}
+
+fn worker_age_seconds(last_millis: u64) -> f64 {
+    let now = METRICS.elapsed_millis();
+    now.saturating_sub(last_millis) as f64 / 1000.0
 }
 
 #[derive(Debug)]
@@ -377,6 +509,35 @@ fn render_metrics(pool: &sqlx::PgPool, operational: OperationalSnapshot) -> Stri
 
     help_type(
         &mut out,
+        "commission_release_worker_enabled",
+        "Whether the automatic release worker is enabled.",
+        "gauge",
+    );
+    sample(
+        &mut out,
+        "commission_release_worker_enabled",
+        "",
+        METRICS.release_worker_enabled.load(Ordering::Relaxed) as f64,
+    );
+    help_type(
+        &mut out,
+        "commission_release_worker_last_tick_age_seconds",
+        "Seconds since the automatic release worker last polling tick.",
+        "gauge",
+    );
+    sample(
+        &mut out,
+        "commission_release_worker_last_tick_age_seconds",
+        "",
+        worker_age_seconds(
+            METRICS
+                .release_worker_last_tick_millis
+                .load(Ordering::Relaxed),
+        ),
+    );
+
+    help_type(
+        &mut out,
         "commission_release_worker_runs_total",
         "Automatic release worker polling ticks.",
         "counter",
@@ -411,6 +572,128 @@ fn render_metrics(pool: &sqlx::PgPool, operational: OperationalSnapshot) -> Stri
         "",
         METRICS.release_worker_errors.load(Ordering::Relaxed) as f64,
     );
+
+    help_type(
+        &mut out,
+        "commission_platform_sync_worker_enabled",
+        "Whether the periodic platform pull worker is enabled.",
+        "gauge",
+    );
+    sample(
+        &mut out,
+        "commission_platform_sync_worker_enabled",
+        "",
+        METRICS.platform_sync_worker_enabled.load(Ordering::Relaxed) as f64,
+    );
+    help_type(
+        &mut out,
+        "commission_platform_sync_worker_interval_seconds",
+        "Configured periodic platform pull interval.",
+        "gauge",
+    );
+    sample(
+        &mut out,
+        "commission_platform_sync_worker_interval_seconds",
+        "",
+        METRICS
+            .platform_sync_worker_interval_seconds
+            .load(Ordering::Relaxed) as f64,
+    );
+    help_type(
+        &mut out,
+        "commission_platform_sync_worker_cycles_total",
+        "Periodic platform pull worker cycles.",
+        "counter",
+    );
+    sample(
+        &mut out,
+        "commission_platform_sync_worker_cycles_total",
+        "",
+        METRICS.platform_sync_worker_cycles.load(Ordering::Relaxed) as f64,
+    );
+    help_type(
+        &mut out,
+        "commission_platform_sync_worker_errors_total",
+        "Periodic platform pull worker top-level errors.",
+        "counter",
+    );
+    sample(
+        &mut out,
+        "commission_platform_sync_worker_errors_total",
+        "",
+        METRICS.platform_sync_worker_errors.load(Ordering::Relaxed) as f64,
+    );
+    help_type(
+        &mut out,
+        "commission_platform_sync_worker_last_cycle_age_seconds",
+        "Seconds since the periodic platform pull worker last cycle.",
+        "gauge",
+    );
+    sample(
+        &mut out,
+        "commission_platform_sync_worker_last_cycle_age_seconds",
+        "",
+        worker_age_seconds(
+            METRICS
+                .platform_sync_worker_last_cycle_millis
+                .load(Ordering::Relaxed),
+        ),
+    );
+
+    help_type(
+        &mut out,
+        "commission_platform_sync_attempts_total",
+        "External platform pull sync attempts by platform and outcome.",
+        "counter",
+    );
+    help_type(
+        &mut out,
+        "commission_platform_sync_duration_seconds",
+        "External platform pull sync duration by platform and outcome.",
+        "histogram",
+    );
+    for (key, stat) in METRICS.platform_sync_snapshot() {
+        let base_labels = format!(
+            "platform=\"{}\",outcome=\"{}\"",
+            escape_label(key.platform),
+            escape_label(key.outcome)
+        );
+        let labels = format!("{{{base_labels}}}");
+        sample(
+            &mut out,
+            "commission_platform_sync_attempts_total",
+            &labels,
+            stat.count as f64,
+        );
+        for (index, (upper_bound, _)) in PLATFORM_SYNC_DURATION_BUCKETS.iter().enumerate() {
+            let bucket_labels = format!("{{{base_labels},le=\"{upper_bound}\"}}");
+            sample(
+                &mut out,
+                "commission_platform_sync_duration_seconds_bucket",
+                &bucket_labels,
+                stat.duration_buckets[index] as f64,
+            );
+        }
+        let infinity_labels = format!("{{{base_labels},le=\"+Inf\"}}");
+        sample(
+            &mut out,
+            "commission_platform_sync_duration_seconds_bucket",
+            &infinity_labels,
+            stat.count as f64,
+        );
+        sample(
+            &mut out,
+            "commission_platform_sync_duration_seconds_sum",
+            &labels,
+            stat.duration_micros as f64 / 1_000_000.0,
+        );
+        sample(
+            &mut out,
+            "commission_platform_sync_duration_seconds_count",
+            &labels,
+            stat.count as f64,
+        );
+    }
 
     help_type(
         &mut out,
@@ -628,5 +911,11 @@ mod tests {
     #[test]
     fn prometheus_label_escaping_is_stable() {
         assert_eq!(escape_label("a\\b\n\"c"), "a\\\\b\\n\\\"c");
+    }
+
+    #[test]
+    fn platform_labels_are_bounded() {
+        assert_eq!(platform_label("taobao"), "taobao");
+        assert_eq!(platform_label("untrusted-platform-id"), "other");
     }
 }

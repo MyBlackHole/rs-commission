@@ -78,11 +78,41 @@ histogram_quantile(
 
 ### 自动解冻 worker
 
+- `commission_release_worker_enabled`
+- `commission_release_worker_last_tick_age_seconds`
 - `commission_release_worker_runs_total`
 - `commission_release_worker_released_total`
 - `commission_release_worker_errors_total`
 
-错误计数增长时结合同时间段 JSON 日志中的 `automatic release failed` 与 request/DB 日志排查。
+错误计数增长时结合同时间段 JSON 日志中的 `automatic release failed` 与 request/DB 日志排查；worker 已启用但 last tick age 持续增长则说明任务本身没有推进。
+
+### 平台 Runtime worker
+
+PR #27 的真实平台 Runtime 也纳入进程指标：
+
+- `commission_platform_sync_worker_enabled`
+- `commission_platform_sync_worker_interval_seconds`
+- `commission_platform_sync_worker_cycles_total`
+- `commission_platform_sync_worker_errors_total`
+- `commission_platform_sync_worker_last_cycle_age_seconds`
+- `commission_platform_sync_attempts_total{platform,outcome}`
+- `commission_platform_sync_duration_seconds_bucket{platform,outcome,le}`
+
+`platform` 只允许 taobao/douyin/meituan/other，`outcome` 只允许 success/error，因此不会因 connection id 或外部订单号制造高基数。周期 worker 的 liveness 与单个平台的请求失败可以分别告警。
+
+## Prometheus 与告警
+
+仓库提供 `deploy/prometheus.yml` 与 `deploy/prometheus-alerts.yml`。本地可直接启动：
+
+```bash
+docker compose --profile observability up --build
+```
+
+Prometheus 仅绑定 `127.0.0.1:9090`，从 Compose 内部网络抓取 `app:8080/metrics`。console Nginx 对 `/metrics` 显式返回 404，防止以后路由调整时误把内部指标暴露到公网入口。
+
+规则文件覆盖 HTTP 5xx/p95、release worker 停滞和错误、平台 worker 停滞/错误/同步失败、Outbox 积压、unknown payout、RawEvent pending/rejected、从未成功同步的连接和 DB pool 持续耗尽。CI 使用 Prometheus 3.15.0 的 `promtool` 同时校验 scrape 配置与 rules。
+
+生产仍应由独立 Prometheus 抓取，并接入 Alertmanager/现有告警平台；仓库不预置邮件、IM webhook 等通知秘密。
 
 ## 初始告警建议
 
@@ -94,11 +124,13 @@ histogram_quantile(
 - `commission_outbox_oldest_pending_age_seconds` 超过消费者允许延迟；
 - `commission_payouts_unknown > 0`；
 - `commission_platform_raw_events{status="rejected"} > 0`；
+- 平台 worker last cycle age 超过配置周期 3 倍再加 30 秒；
+- 任一平台 10 分钟出现同步失败；
 - 平台同步成功年龄超过该平台正常同步周期的数倍；
-- DB pool idle 长时间为 0 且 HTTP 延迟同时上升。
+- DB pool idle 长时间为 0 且存在进行中的 HTTP 请求。
 
 告警用于提示调查，不应自动执行资金补偿、重付、改账或删除 rejected RawEvent。
 
 ## 边界
 
-本轮没有引入分布式 trace collector、OpenTelemetry exporter、日志后端、Grafana dashboard 或自动告警系统。`/metrics` 是进程与 PostgreSQL 当前状态的观测入口；生产仍需外部 Prometheus/日志平台负责采集、持久化、展示和告警。
+本轮没有引入分布式 trace collector、OpenTelemetry exporter、日志后端、Grafana dashboard 或 Alertmanager 通知配置。`/metrics` 是进程与 PostgreSQL 当前状态的观测入口；仓库提供可验证的 Prometheus scrape/rules 基线，但生产仍需外部监控平台负责持久化、展示、通知路由和告警值班。

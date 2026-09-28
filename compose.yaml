@@ -38,6 +38,20 @@ services:
     cap_drop: [ALL]
     security_opt: ['no-new-privileges:true']
     stop_grace_period: 40s
+  prometheus:
+    profiles: [observability]
+    image: prom/prometheus:v3.15.0
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+    ports: ['127.0.0.1:9090:9090']
+    volumes:
+      - ./deploy/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./deploy/prometheus-alerts.yml:/etc/prometheus/rules/commission.yml:ro
+      - prometheus:/prometheus
+    depends_on:
+      app:
+        condition: service_started
   console:
     profiles: [web]
     build:
@@ -47,3 +61,4 @@ services:
     depends_on: [app]
 volumes:
   database:
+  prometheus:

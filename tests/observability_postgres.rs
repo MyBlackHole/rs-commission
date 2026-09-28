@@ -3,7 +3,7 @@ use axum::{
     http::{Request, StatusCode},
     Router,
 };
-use commission::{http, AppState};
+use commission::{http, observability, AppState};
 use http_body_util::BodyExt;
 use serde_json::json;
 use sqlx::PgPool;
@@ -82,6 +82,13 @@ async fn metrics_surface_request_and_operational_signals(pool: PgPool) {
     .await
     .unwrap();
 
+    observability::configure_workers(true, true, 60);
+    observability::platform_sync_observe(
+        "untrusted-platform-id",
+        false,
+        std::time::Duration::from_millis(250),
+    );
+
     let app = http::router(AppState { pool });
 
     let supplied = Uuid::new_v4();
@@ -123,6 +130,13 @@ async fn metrics_surface_request_and_operational_signals(pool: PgPool) {
         "commission_http_requests_total{method=\"GET\",route=\"/health/live\",status=\"200\"}"
     ));
     assert!(body.contains("commission_db_pool_connections "));
+    assert!(body.contains("commission_release_worker_enabled 1.000000"));
+    assert!(body.contains("commission_platform_sync_worker_enabled 1.000000"));
+    assert!(body.contains("commission_platform_sync_worker_interval_seconds 60.000000"));
+    assert!(body.contains(
+        "commission_platform_sync_attempts_total{platform=\"other\",outcome=\"error\"} 1.000000"
+    ));
+    assert!(!body.contains("untrusted-platform-id"));
     assert!(body.contains("commission_outbox_pending 1.000000"));
     assert!(body.contains("commission_wallets_negative_available 1.000000"));
     assert!(body.contains(

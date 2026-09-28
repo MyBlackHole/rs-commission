@@ -1,0 +1,144 @@
+groups:
+  - name: commission
+    rules:
+      - alert: CommissionApiHigh5xxRatio
+        expr: |
+          (
+            sum(rate(commission_http_requests_total{status=~"5.."}[5m]))
+            /
+            clamp_min(sum(rate(commission_http_requests_total[5m])), 0.001)
+          ) > 0.01
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: commission API 5xx 比例持续超过 1%
+          description: 先按 X-Request-Id 关联应用日志，再检查数据库和外部平台依赖。
+
+      - alert: CommissionApiP95LatencyHigh
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum by (le, route) (
+              rate(commission_http_request_duration_seconds_bucket[5m])
+            )
+          ) > 1
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: commission API p95 延迟持续超过 1 秒
+          description: 按 route 检查慢请求，并结合 DB pool、外部平台同步与 PostgreSQL 状态定位。
+
+      - alert: CommissionReleaseWorkerStalled
+        expr: |
+          commission_release_worker_enabled == 1
+          and
+          commission_release_worker_last_tick_age_seconds > 30
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: 自动解冻 worker 停止推进
+          description: worker 已启用但超过 30 秒没有 tick；检查 Tokio 任务、进程负载和数据库阻塞。
+
+      - alert: CommissionReleaseWorkerErrors
+        expr: increase(commission_release_worker_errors_total[10m]) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: 自动解冻 worker 出现错误
+          description: 检查同时间段 automatic release failed 日志；不要通过直接改钱包绕过失败。
+
+      - alert: CommissionPlatformSyncWorkerStalled
+        expr: |
+          commission_platform_sync_worker_enabled == 1
+          and
+          commission_platform_sync_worker_last_cycle_age_seconds
+            > (commission_platform_sync_worker_interval_seconds * 3 + 30)
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: 平台同步 worker 停止推进
+          description: 最近 cycle 已明显超过配置周期；检查 worker 任务是否存活及外部请求是否卡住。
+
+      - alert: CommissionPlatformSyncWorkerErrors
+        expr: increase(commission_platform_sync_worker_errors_total[10m]) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: 平台同步 worker 顶层查询出现错误
+          description: worker 无法列出连接；优先检查 PostgreSQL 可用性和运行账号权限。
+
+      - alert: CommissionPlatformSyncAttemptsFailing
+        expr: |
+          sum by (platform) (
+            increase(commission_platform_sync_attempts_total{outcome="error"}[10m])
+          ) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: 外部平台同步出现失败
+          description: 检查对应 platform 的 checkpoint last_error、凭据、签名、限流和上游状态。
+
+      - alert: CommissionOutboxBacklogOld
+        expr: commission_outbox_oldest_pending_age_seconds > 300
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: Outbox 最老未投递事件超过 5 分钟
+          description: 检查消费者、lease 和 ACK；不要删除历史事件来消除积压。
+
+      - alert: CommissionPayoutUnknown
+        expr: commission_payouts_unknown > 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: 存在外部结果未知的提现
+          description: 必须核查渠道原交易；不要换业务号或幂等键重新出款。
+
+      - alert: CommissionPlatformRawRejected
+        expr: commission_platform_raw_events{status="rejected"} > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: 平台 RawEvent 持续存在 rejected
+          description: 检查平台字段变化、状态映射和 normalizer；保留原始事件用于追溯。
+
+      - alert: CommissionPlatformRawPendingOld
+        expr: commission_platform_raw_event_oldest_age_seconds{status="pending"} > 900
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: 平台 RawEvent pending 超过 15 分钟
+          description: 检查同步/normalizer 是否继续推进以及 checkpoint 是否停滞。
+
+      - alert: CommissionPlatformConnectionNeverSynced
+        expr: |
+          commission_platform_active_connections
+          -
+          commission_platform_connections_with_success
+          > 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: 存在从未成功同步的平台连接
+          description: 检查连接凭据和 checkpoint；新建连接的初次同步也会短暂触发该条件。
+
+      - alert: CommissionDbPoolSaturated
+        expr: |
+          commission_db_pool_idle_connections == 0
+          and
+          commission_http_requests_in_flight > 0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: PostgreSQL 连接池持续无空闲连接
+          description: 检查慢 SQL、锁等待和请求并发；不要仅通过盲目扩大连接池掩盖问题。
