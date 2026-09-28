@@ -1,4 +1,4 @@
-use crate::platform::{
+use crate::{observability, platform::{
     douyin::{
         DouyinAllianceSync, DouyinApiSigner, DouyinClient, DouyinCredentials,
         DouyinMessageVerifier, ReqwestDouyinTransport,
@@ -10,12 +10,12 @@ use crate::platform::{
         ReqwestTaobaoTransport, TaobaoClient, TaobaoCredentials, TaobaoOrderSync, TaobaoSigner,
     },
     PlatformError, Result,
-};
+}};
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use sqlx::PgPool;
-use std::env;
+use std::{env, time::Instant};
 use uuid::Uuid;
 
 const MAX_SYNC_ERROR_LEN: usize = 512;
@@ -109,6 +109,7 @@ pub async fn sync_pull_connection(
     now: DateTime<Utc>,
 ) -> Result<Value> {
     let connection = connection(pool, connection_id).await?;
+    let started = Instant::now();
     let result = match connection.platform.as_str() {
         "taobao" => sync_taobao(pool, &connection, now).await,
         "meituan" => sync_meituan(pool, &connection, now).await,
@@ -123,6 +124,8 @@ pub async fn sync_pull_connection(
             )));
         }
     };
+
+    observability::platform_sync_observe(&connection.platform, result.is_ok(), started.elapsed());
 
     if let Err(error) = &result {
         if !matches!(error, PlatformError::ConcurrentSync) {
@@ -232,6 +235,7 @@ pub async fn run_pull_cycle(pool: &PgPool, now: DateTime<Utc>) {
     {
         Ok(rows) => rows,
         Err(error) => {
+            observability::platform_sync_worker_error();
             tracing::error!(%error, "platform sync worker could not list connections");
             return;
         }
