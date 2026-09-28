@@ -197,8 +197,8 @@ impl OperationalSnapshot {
         .await?;
 
         let (payouts_processing, payouts_unknown): (i64, i64) = sqlx::query_as(
-            "SELECT count(*) FILTER (WHERE status = 'processing')::bigint,
-                    count(*) FILTER (WHERE status = 'unknown')::bigint
+            "SELECT (count(*) FILTER (WHERE status = 'processing'))::bigint,
+                    (count(*) FILTER (WHERE status = 'unknown'))::bigint
              FROM payouts",
         )
         .fetch_one(pool)
@@ -226,7 +226,7 @@ impl OperationalSnapshot {
         let platform_sync: Vec<(String, i64, i64, f64)> = sqlx::query_as(
             "SELECT c.platform,
                     count(DISTINCT c.id)::bigint AS active_connections,
-                    count(DISTINCT c.id) FILTER (WHERE cp.last_success_at IS NOT NULL)::bigint
+                    (count(DISTINCT c.id) FILTER (WHERE cp.last_success_at IS NOT NULL))::bigint
                         AS connections_with_success,
                     COALESCE(
                         EXTRACT(EPOCH FROM (now() - min(cp.last_success_at)))::double precision,
@@ -296,8 +296,8 @@ fn render_metrics(pool: &sqlx::PgPool, operational: OperationalSnapshot) -> Stri
     help_type(
         &mut out,
         "commission_http_request_duration_seconds",
-        "Accumulated HTTP request duration by method, matched route and status.",
-        "counter",
+        "HTTP request duration by method, matched route and status.",
+        "summary",
     );
     for (key, stat) in METRICS.http_snapshot() {
         let labels = format!(
