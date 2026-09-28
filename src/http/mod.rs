@@ -334,7 +334,32 @@ async fn douyin_webhook(
     .await
     .map_err(|_| Error::Busy)??;
 
-    tracing::info!(connection_id = %id, outcome = %outcome, "douyin webhook accepted");
+    tracing::info!(
+        connection_id = %id,
+        raw_events = outcome.get("raw_events").and_then(Value::as_u64).unwrap_or(0),
+        duplicates = outcome.get("duplicates").and_then(Value::as_u64).unwrap_or(0),
+        order_observations = outcome
+            .get("order_observations")
+            .and_then(Value::as_u64)
+            .unwrap_or(0),
+        commission_observations = outcome
+            .get("commission_observations")
+            .and_then(Value::as_u64)
+            .unwrap_or(0),
+        refund_observations = outcome
+            .get("refund_observations")
+            .and_then(Value::as_u64)
+            .unwrap_or(0),
+        settlement_observations = outcome
+            .get("settlement_observations")
+            .and_then(Value::as_u64)
+            .unwrap_or(0),
+        ignored_messages = outcome
+            .get("ignored_messages")
+            .and_then(Value::as_u64)
+            .unwrap_or(0),
+        "douyin webhook accepted"
+    );
     Ok(Json(json!({"code": 0, "msg": "success"})))
 }
 
