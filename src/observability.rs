@@ -31,9 +31,6 @@ const HTTP_DURATION_BUCKETS: [(&str, f64); 10] = [
     ("5.000", 5.000),
 ];
 
-#[derive(Clone, Copy, Debug)]
-pub struct RequestId(pub Uuid);
-
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
 struct HttpKey {
     method: &'static str,
@@ -112,8 +109,6 @@ pub async fn observe_http(mut request: Request, next: Next) -> Response {
         .and_then(|value| value.to_str().ok())
         .and_then(|value| Uuid::parse_str(value).ok())
         .unwrap_or_else(Uuid::new_v4);
-    request.extensions_mut().insert(RequestId(request_id));
-
     let method = method_label(request.method());
     let route = route_label(&request);
     let started = Instant::now();
@@ -149,14 +144,14 @@ pub async fn observe_http(mut request: Request, next: Next) -> Response {
 }
 
 fn method_label(method: &Method) -> &'static str {
-    match *method {
-        Method::GET => "GET",
-        Method::POST => "POST",
-        Method::PUT => "PUT",
-        Method::PATCH => "PATCH",
-        Method::DELETE => "DELETE",
-        Method::HEAD => "HEAD",
-        Method::OPTIONS => "OPTIONS",
+    match method.as_str() {
+        "GET" => "GET",
+        "POST" => "POST",
+        "PUT" => "PUT",
+        "PATCH" => "PATCH",
+        "DELETE" => "DELETE",
+        "HEAD" => "HEAD",
+        "OPTIONS" => "OPTIONS",
         _ => "OTHER",
     }
 }
