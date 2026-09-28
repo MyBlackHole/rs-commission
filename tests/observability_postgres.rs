@@ -194,7 +194,7 @@ async fn metrics_surface_request_and_operational_signals(pool: PgPool) {
     let body = text(metrics).await;
 
     assert!(ALERT_RULES.contains("up{job=\"commission\"}"));
-    for (rule_metric, exposition_metric) in ALERT_METRIC_CONTRACT {
+    for &(rule_metric, exposition_metric) in ALERT_METRIC_CONTRACT {
         assert!(
             ALERT_RULES.contains(rule_metric),
             "alert rules no longer reference contracted metric {rule_metric}"
