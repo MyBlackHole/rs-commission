@@ -18,7 +18,7 @@
 
 触发器不能防数据库超级用户，运行角色仍需钱包更新权限以执行投影；不可变账本不等于任意 SQL 攻击下的防篡改存储。
 
-生产 Web 必须在 HTTPS 网关后提供服务，设置限流、超时、连接限制和告警。Nginx 样例不签发/续期证书。MFA、SSO、完整监控和高可用部署尚未实现。
+生产 Web 必须在 HTTPS 网关后提供服务，设置限流、超时、连接限制和告警。Nginx 样例不签发/续期证书。后端已提供 JSON tracing、X-Request-Id 与内部 `/metrics` 基础指标，但 Prometheus/Grafana/日志平台、自动告警和高可用部署仍需外部系统完成；MFA、SSO 也尚未实现。
 
 ## 凭据
 
@@ -36,7 +36,7 @@ capture/refund 是可信业务事实入口，不是匿名支付回调。未来�
 
 ## 日常运行与欠款
 
-关注 503、锁等待、到期未解冻、负余额、执行中/未知提现和 Outbox 积压。已有总览与 JSON 日志；自动告警、死信和归档尚未完成。
+关注 503、锁等待、到期未解冻、负余额、执行中/未知提现、Outbox 积压，以及平台 RawEvent pending/rejected 与 checkpoint 停滞。JSON 日志可按 X-Request-Id 关联；`/metrics` 暴露 HTTP p95 所需 histogram、DB pool、Outbox、提现异常、负余额、平台同步和自动解冻 worker 指标。自动告警、死信和归档尚未完成，建议按 [可观测性](OBSERVABILITY.md) 的初始阈值接入外部监控。
 
 内部对账用一致性快照，wallet_differences 最多返回 100 个差异样本。异常先暂停出款并保留证据，修复须可审计，不能覆盖历史分录强行对平。ok=true 也不能替代银行/渠道账单核验。
 

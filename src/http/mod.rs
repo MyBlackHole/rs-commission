@@ -2,6 +2,7 @@ use crate::{
     auth,
     error::{Error, Result},
     model::*,
+    observability,
     service::{catalog, orders, outbox, payouts, queries},
     AppState,
 };
@@ -14,7 +15,7 @@ use axum::{
 };
 use serde::de::DeserializeOwned;
 use serde_json::{json, Value};
-use tower_http::{set_header::SetResponseHeaderLayer, trace::TraceLayer};
+use tower_http::set_header::SetResponseHeaderLayer;
 use uuid::Uuid;
 
 pub struct ApiJson<T>(pub T);
@@ -82,6 +83,7 @@ pub fn router(state: AppState) -> Router {
         .route("/", get(index))
         .route("/health/live", get(|| async { Json(json!({"status":"alive"})) }))
         .route("/health/ready", get(ready))
+        .route("/metrics", get(observability::metrics))
         .nest("/api/v1", api)
         .fallback(|| async { Error::NotFound })
         .layer(DefaultBodyLimit::max(64 * 1024))
@@ -91,7 +93,7 @@ pub fn router(state: AppState) -> Router {
         .layer(SetResponseHeaderLayer::overriding(header::X_FRAME_OPTIONS, HeaderValue::from_static("DENY")))
         .layer(SetResponseHeaderLayer::overriding(header::CONTENT_SECURITY_POLICY, HeaderValue::from_static(
             "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'")))
-        .layer(TraceLayer::new_for_http())
+        .layer(middleware::from_fn(observability::observe_http))
         .with_state(state)
 }
 
