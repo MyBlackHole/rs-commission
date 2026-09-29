@@ -53,6 +53,24 @@ services:
     depends_on:
       app:
         condition: service_started
+  grafana:
+    profiles: [observability]
+    image: grafana/grafana:13.2.2
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-commission-local-only}
+      GF_USERS_ALLOW_SIGN_UP: 'false'
+      GF_AUTH_ANONYMOUS_ENABLED: 'false'
+      GF_ANALYTICS_REPORTING_ENABLED: 'false'
+      GF_ANALYTICS_CHECK_FOR_UPDATES: 'false'
+    ports: ['127.0.0.1:3000:3000']
+    volumes:
+      - ./deploy/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./deploy/grafana/dashboards:/etc/grafana/dashboards:ro
+      - grafana:/var/lib/grafana
+    depends_on:
+      prometheus:
+        condition: service_started
   console:
     profiles: [web]
     build:
@@ -63,3 +81,4 @@ services:
 volumes:
   database:
   prometheus:
+  grafana:
