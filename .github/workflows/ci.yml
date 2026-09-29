@@ -348,6 +348,38 @@ jobs:
           PY
       - name: Validate observability Compose profile
         run: POSTGRES_PASSWORD=ci docker compose --profile observability config >/dev/null
+      - name: Smoke test Grafana provisioning
+        run: |
+          docker run --rm -d --name commission-grafana-ci \
+            -p 127.0.0.1:33000:3000 \
+            -e GF_SECURITY_ADMIN_USER=admin \
+            -e GF_SECURITY_ADMIN_PASSWORD=ci-grafana-password \
+            -e GF_USERS_ALLOW_SIGN_UP=false \
+            -e GF_AUTH_ANONYMOUS_ENABLED=false \
+            -e GF_ANALYTICS_REPORTING_ENABLED=false \
+            -e GF_ANALYTICS_CHECK_FOR_UPDATES=false \
+            -v "$PWD/deploy/grafana/provisioning:/etc/grafana/provisioning:ro" \
+            -v "$PWD/deploy/grafana/dashboards:/etc/grafana/dashboards:ro" \
+            grafana/grafana:13.2.2
+          trap 'docker logs commission-grafana-ci || true; docker stop commission-grafana-ci >/dev/null 2>&1 || true' EXIT
+          for _ in $(seq 1 60); do
+            if curl --silent --fail http://127.0.0.1:33000/api/health >/dev/null; then
+              break
+            fi
+            sleep 1
+          done
+          curl --fail --user admin:ci-grafana-password \
+            http://127.0.0.1:33000/api/datasources/uid/prometheus \
+            | grep -q '"uid":"prometheus"'
+          curl --fail --user admin:ci-grafana-password \
+            http://127.0.0.1:33000/api/dashboards/uid/commission-overview \
+            | grep -q '"uid":"commission-overview"'
+          docker logs commission-grafana-ci 2>&1 | tee /tmp/commission-grafana.log
+          if grep -Ei 'failed to provision|error.*provision' /tmp/commission-grafana.log; then
+            exit 1
+          fi
+          docker stop commission-grafana-ci >/dev/null
+          trap - EXIT
   format:
     runs-on: ubuntu-latest
     steps:
