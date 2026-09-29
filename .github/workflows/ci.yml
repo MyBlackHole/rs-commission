@@ -358,7 +358,9 @@ jobs:
             -e GF_AUTH_ANONYMOUS_ENABLED=false \
             -e GF_ANALYTICS_REPORTING_ENABLED=false \
             -e GF_ANALYTICS_CHECK_FOR_UPDATES=false \
-            -v "$PWD/deploy/grafana/provisioning:/etc/grafana/provisioning:ro" \
+            -e GF_PLUGINS_PREINSTALL_DISABLED=true \
+            -v "$PWD/deploy/grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro" \
+            -v "$PWD/deploy/grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro" \
             -v "$PWD/deploy/grafana/dashboards:/etc/grafana/dashboards:ro" \
             grafana/grafana:13.2.2
           trap 'docker logs commission-grafana-ci || true; docker stop commission-grafana-ci >/dev/null 2>&1 || true' EXIT
