@@ -63,9 +63,11 @@ services:
       GF_AUTH_ANONYMOUS_ENABLED: 'false'
       GF_ANALYTICS_REPORTING_ENABLED: 'false'
       GF_ANALYTICS_CHECK_FOR_UPDATES: 'false'
+      GF_PLUGINS_PREINSTALL_DISABLED: 'true'
     ports: ['127.0.0.1:3000:3000']
     volumes:
-      - ./deploy/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./deploy/grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./deploy/grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
       - ./deploy/grafana/dashboards:/etc/grafana/dashboards:ro
       - grafana:/var/lib/grafana
     depends_on:
