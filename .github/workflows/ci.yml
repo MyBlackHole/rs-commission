@@ -293,8 +293,95 @@ jobs:
           docker run --rm --entrypoint /bin/promtool -w /work \
             -v "$PWD/deploy:/work:ro" \
             prom/prometheus:v3.15.0 test rules /work/prometheus-alert-tests.yml
+      - name: Validate Grafana dashboard JSON
+        run: python3 -m json.tool deploy/grafana/dashboards/commission-overview.json >/dev/null
+      - name: Validate dashboard and runbook contracts
+        run: |
+          python3 - <<'PY'
+          import json
+          import pathlib
+          import re
+
+          root = pathlib.Path(".")
+          dashboard_path = root / "deploy/grafana/dashboards/commission-overview.json"
+          dashboard = json.loads(dashboard_path.read_text(encoding="utf-8"))
+          assert dashboard["uid"] == "commission-overview"
+          assert dashboard["refresh"] == "30s"
+
+          targets = [
+              target
+              for panel in dashboard.get("panels", [])
+              for target in panel.get("targets", [])
+              if target.get("expr")
+          ]
+          assert targets, "dashboard has no Prometheus queries"
+          assert all(
+              target.get("datasource", {}).get("uid") == "prometheus"
+              for target in targets
+          ), "dashboard target must use provisioned Prometheus uid"
+
+          queries = "\n".join(target["expr"] for target in targets)
+          metrics = set(re.findall(r"\bcommission_[A-Za-z0-9_]+\b", queries))
+          source = (root / "src/observability.rs").read_text(encoding="utf-8")
+          missing_metrics = sorted(metric for metric in metrics if metric not in source)
+          assert not missing_metrics, f"dashboard references unknown metrics: {missing_metrics}"
+
+          rules = (root / "deploy/prometheus-alerts.yml").read_text(encoding="utf-8")
+          runbook = (root / "docs/OBSERVABILITY_RUNBOOK.md").read_text(encoding="utf-8")
+          alerts = re.findall(r"^\s*- alert:\s+(\S+)", rules, flags=re.MULTILINE)
+          assert alerts, "no alert rules found"
+          for alert in alerts:
+              assert f"## {alert}" in runbook, f"runbook section missing for {alert}"
+              anchor = alert.lower()
+              expected = (
+                  "runbook_url: "
+                  "https://github.com/MyBlackHole/rs-commission/blob/main/"
+                  f"docs/OBSERVABILITY_RUNBOOK.md#{anchor}"
+              )
+              assert expected in rules, f"runbook_url missing for {alert}"
+
+          links = dashboard.get("links", [])
+          assert any(
+              link.get("url", "").endswith("docs/OBSERVABILITY_RUNBOOK.md")
+              for link in links
+          ), "dashboard must link to the runbook"
+          PY
       - name: Validate observability Compose profile
         run: POSTGRES_PASSWORD=ci docker compose --profile observability config >/dev/null
+      - name: Smoke test Grafana provisioning
+        run: |
+          docker run --rm -d --name commission-grafana-ci \
+            -p 127.0.0.1:33000:3000 \
+            -e GF_SECURITY_ADMIN_USER=admin \
+            -e GF_SECURITY_ADMIN_PASSWORD=ci-grafana-password \
+            -e GF_USERS_ALLOW_SIGN_UP=false \
+            -e GF_AUTH_ANONYMOUS_ENABLED=false \
+            -e GF_ANALYTICS_REPORTING_ENABLED=false \
+            -e GF_ANALYTICS_CHECK_FOR_UPDATES=false \
+            -e GF_PLUGINS_PREINSTALL_DISABLED=true \
+            -v "$PWD/deploy/grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro" \
+            -v "$PWD/deploy/grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro" \
+            -v "$PWD/deploy/grafana/dashboards:/etc/grafana/dashboards:ro" \
+            grafana/grafana:13.2.2
+          trap 'docker logs commission-grafana-ci || true; docker stop commission-grafana-ci >/dev/null 2>&1 || true' EXIT
+          for _ in $(seq 1 60); do
+            if curl --silent --fail http://127.0.0.1:33000/api/health >/dev/null; then
+              break
+            fi
+            sleep 1
+          done
+          curl --fail --user admin:ci-grafana-password \
+            http://127.0.0.1:33000/api/datasources/uid/prometheus \
+            | grep -q '"uid":"prometheus"'
+          curl --fail --user admin:ci-grafana-password \
+            http://127.0.0.1:33000/api/dashboards/uid/commission-overview \
+            | grep -q '"uid":"commission-overview"'
+          docker logs commission-grafana-ci 2>&1 | tee /tmp/commission-grafana.log
+          if grep -Ei 'failed to provision|error.*provision' /tmp/commission-grafana.log; then
+            exit 1
+          fi
+          docker stop commission-grafana-ci >/dev/null
+          trap - EXIT
   format:
     runs-on: ubuntu-latest
     steps:
