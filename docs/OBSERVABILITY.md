@@ -108,11 +108,13 @@ PR #27 的真实平台 Runtime 也纳入进程指标：
 docker compose --profile observability up --build
 ```
 
-Prometheus UI 仅绑定 `127.0.0.1:9090`，从 Compose 内部网络抓取独立的 `app:9091/metrics`。业务 API 端口 `app:8080` 不注册该路由，console Nginx 也对 `/metrics` 显式返回 404，形成两层隔离。
+Prometheus UI 仅绑定 `127.0.0.1:9090`，从 Compose 内部网络抓取独立的 `app:9091/metrics`。Grafana OSS 13.2.2 同属 `observability` profile，仅绑定 `127.0.0.1:3000`，启动时自动 provision Prometheus datasource 和 **Commission Operations Overview** dashboard。业务 API 端口 `app:8080` 不注册 metrics 路由，console Nginx 也对 `/metrics` 显式返回 404。
 
 规则文件覆盖 metrics target down、HTTP 5xx/p95、release worker 停滞和错误、平台 worker 停滞/错误/同步失败、Outbox 积压、unknown payout、RawEvent pending/rejected、从未成功同步的连接和 DB pool 持续耗尽。CI 使用 Prometheus 3.15.0 的 `promtool` 同时校验 scrape 配置与 rules。
 
-生产仍应由独立 Prometheus 抓取，并接入 Alertmanager/现有告警平台；仓库不预置邮件、IM webhook 等通知秘密。
+本地 Grafana 默认账号来自 `GRAFANA_ADMIN_USER/GRAFANA_ADMIN_PASSWORD`；Compose 仅提供 localhost 开发基线，部署到共享主机前必须更换密码并通过受控网络访问。每条 Prometheus 告警都带 `runbook_url`，对应 [告警 Runbook](OBSERVABILITY_RUNBOOK.md)。
+
+CI 不只检查 dashboard JSON：还会提取所有 Grafana PromQL 中的 `commission_*` metric 并与 `src/observability.rs` 契约校验，同时确保每条告警存在 Runbook 章节和 URL。生产仍应由独立 Prometheus/Grafana 抓取展示，并接入 Alertmanager/现有告警平台；仓库不预置邮件、IM webhook 等通知秘密。
 
 ## 初始告警建议
 
@@ -133,4 +135,4 @@ Prometheus UI 仅绑定 `127.0.0.1:9090`，从 Compose 内部网络抓取独立�
 
 ## 边界
 
-本轮没有引入分布式 trace collector、OpenTelemetry exporter、日志后端、Grafana dashboard 或 Alertmanager 通知配置。`/metrics` 是进程与 PostgreSQL 当前状态的观测入口；仓库提供可验证的 Prometheus scrape/rules 基线，但生产仍需外部监控平台负责持久化、展示、通知路由和告警值班。
+本轮仍没有引入分布式 trace collector、OpenTelemetry exporter、日志后端或 Alertmanager 通知配置。仓库已经提供可 provision 的 Grafana dashboard 与告警 Runbook。`/metrics` 是进程与 PostgreSQL 当前状态的观测入口；仓库提供可验证的 Prometheus scrape/rules 基线，但生产仍需外部监控平台负责持久化、展示、通知路由和告警值班。
